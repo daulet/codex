@@ -1,0 +1,16 @@
+---
+source: tui/src/bottom_pane/mod.rs
+assertion_line: 1667
+expression: "render_snapshot(&pane, area)"
+---
+  /btw what path we in                                                
+                                                                      
+    The current working directory is:                                 
+                                                                      
+    /Users/dzhanguzin/dev/personal/codex                              
+                                                                      
+  ↑/↓ to scroll · Space, Enter, or Escape to dismiss                  
+                                                                      
+› Ask Codex to do anything                                            
+                                                                      
+  ? for shortcuts                                  100% context left

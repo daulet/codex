@@ -2,4 +2,4 @@
 source: tui/src/bottom_pane/footer.rs
 expression: terminal.backend()
 ---
-"  Status line content · Robie [explorer]                                        "
+"  [FORK daulet/codex] · Status line content · Robie [explorer]                  "

@@ -54,6 +54,10 @@ use ratatui::text::Line;
 use ratatui::text::Span;
 use ratatui::widgets::Paragraph;
 use ratatui::widgets::Widget;
+use std::path::Path;
+use std::path::PathBuf;
+use std::process::Command;
+use std::sync::OnceLock;
 
 /// The rendering inputs for the footer area under the composer.
 ///
@@ -97,6 +101,7 @@ pub(crate) enum CollaborationModeIndicator {
 
 const MODE_CYCLE_HINT: &str = "shift+tab to cycle";
 const FOOTER_CONTEXT_GAP_COLS: u16 = 1;
+const SESSION_VARIANT_BADGE_BASE_LABEL: &str = "FORK";
 
 impl CollaborationModeIndicator {
     fn label(self, show_cycle_hint: bool) -> String {
@@ -632,9 +637,10 @@ fn footer_from_props_lines(
 
 /// Returns the contextual footer row when the footer is not busy showing an instructional hint.
 ///
-/// The returned line may contain the configured status line, the currently viewed agent label, or
-/// both combined. Active instructional states such as quit reminders, shortcut overlays, and queue
-/// prompts deliberately return `None` so those call-to-action hints stay visible.
+/// The returned line prepends a fork badge and may include the configured status line, the
+/// currently viewed agent label, or both combined. Active instructional states such as quit
+/// reminders, shortcut overlays, and queue prompts deliberately return `None` so those
+/// call-to-action hints stay visible.
 pub(crate) fn passive_footer_status_line(props: &FooterProps) -> Option<Line<'static>> {
     if !shows_passive_footer_line(props) {
         return None;
@@ -655,7 +661,150 @@ pub(crate) fn passive_footer_status_line(props: &FooterProps) -> Option<Line<'st
         }
     }
 
-    line
+    if line.is_none() && !props.status_line_enabled {
+        return None;
+    }
+
+    Some(prepend_session_variant_badge(
+        line.unwrap_or_else(|| Line::from("")),
+    ))
+}
+
+fn session_variant_badge_span() -> Span<'static> {
+    format!("[{}]", session_variant_badge_label())
+        .magenta()
+        .bold()
+}
+
+fn prepend_session_variant_badge(mut line: Line<'static>) -> Line<'static> {
+    let mut spans = Vec::with_capacity(line.spans.len() + 2);
+    spans.push(session_variant_badge_span());
+    if !line.spans.is_empty() {
+        spans.push(" · ".dim());
+        spans.append(&mut line.spans);
+    }
+    Line::from(spans)
+}
+
+fn session_variant_badge_label() -> &'static str {
+    static LABEL: OnceLock<String> = OnceLock::new();
+    LABEL
+        .get_or_init(detect_session_variant_badge_label)
+        .as_str()
+}
+
+fn detect_session_variant_badge_label() -> String {
+    let Some(repo_root) = codex_repo_root() else {
+        return SESSION_VARIANT_BADGE_BASE_LABEL.to_string();
+    };
+    let Some(repo_slug) = preferred_remote_repo_slug(repo_root.as_path()) else {
+        return SESSION_VARIANT_BADGE_BASE_LABEL.to_string();
+    };
+    format!("{SESSION_VARIANT_BADGE_BASE_LABEL} {repo_slug}")
+}
+
+fn codex_repo_root() -> Option<PathBuf> {
+    let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir.parent()?.parent().map(Path::to_path_buf)
+}
+
+fn preferred_remote_repo_slug(repo_root: &Path) -> Option<String> {
+    for remote_name in ["origin", "upstream"] {
+        let Some(remote_url) = git_remote_url(repo_root, remote_name) else {
+            continue;
+        };
+        if let Some(repo_slug) = remote_repo_slug(remote_url.as_str()) {
+            return Some(repo_slug);
+        }
+    }
+
+    let remote_names = git_remote_names(repo_root)?;
+    for remote_name in remote_names {
+        if remote_name == "origin" || remote_name == "upstream" {
+            continue;
+        }
+        let Some(remote_url) = git_remote_url(repo_root, remote_name.as_str()) else {
+            continue;
+        };
+        if let Some(repo_slug) = remote_repo_slug(remote_url.as_str()) {
+            return Some(repo_slug);
+        }
+    }
+
+    None
+}
+
+fn git_remote_url(repo_root: &Path, remote_name: &str) -> Option<String> {
+    let output = Command::new("git")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .current_dir(repo_root)
+        .args(["remote", "get-url", remote_name])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let output = String::from_utf8(output.stdout).ok()?;
+    let remote_url = output.trim();
+    if remote_url.is_empty() {
+        None
+    } else {
+        Some(remote_url.to_string())
+    }
+}
+
+fn git_remote_names(repo_root: &Path) -> Option<Vec<String>> {
+    let output = Command::new("git")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .current_dir(repo_root)
+        .args(["remote"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    let output = String::from_utf8(output.stdout).ok()?;
+    let remote_names = output
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if remote_names.is_empty() {
+        None
+    } else {
+        Some(remote_names)
+    }
+}
+
+fn remote_repo_slug(url: &str) -> Option<String> {
+    let url = url.trim().trim_end_matches('/');
+    let url = url.strip_suffix(".git").unwrap_or(url);
+    if url.is_empty() {
+        return None;
+    }
+
+    if let Some((_, host_and_path)) = url.split_once("://")
+        && let Some((_, path)) = host_and_path.split_once('/')
+    {
+        return owner_repo_slug(path);
+    }
+
+    if url.contains('@')
+        && let Some((_, path)) = url.split_once(':')
+    {
+        return owner_repo_slug(path);
+    }
+
+    owner_repo_slug(url)
+}
+
+fn owner_repo_slug(path: &str) -> Option<String> {
+    let mut segments = path.split('/').filter(|segment| !segment.is_empty());
+    let owner = segments.next()?;
+    let repo = segments.next()?;
+    Some(format!("{owner}/{repo}"))
 }
 
 /// Whether the current footer mode allows contextual information to replace instructional hints.
@@ -1746,5 +1895,29 @@ mod tests {
             .key;
 
         assert_eq!(actual_key, expected_key);
+    }
+
+    #[test]
+    fn remote_repo_slug_parses_https_remote_url() {
+        assert_eq!(
+            remote_repo_slug("https://github.com/daulet/codex.git"),
+            Some("daulet/codex".to_string())
+        );
+    }
+
+    #[test]
+    fn remote_repo_slug_parses_ssh_remote_url() {
+        assert_eq!(
+            remote_repo_slug("git@github.com:daulet/codex.git"),
+            Some("daulet/codex".to_string())
+        );
+    }
+
+    #[test]
+    fn remote_repo_slug_parses_ssh_scheme_remote_url() {
+        assert_eq!(
+            remote_repo_slug("ssh://git@github.com/daulet/codex.git"),
+            Some("daulet/codex".to_string())
+        );
     }
 }
