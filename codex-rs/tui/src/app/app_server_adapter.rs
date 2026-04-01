@@ -187,7 +187,14 @@ impl App {
             _ => {}
         }
 
-        match server_notification_thread_target(&notification) {
+        let thread_target = server_notification_thread_target(&notification);
+        if let ServerNotificationThreadTarget::Thread(thread_id) = thread_target
+            && self.handle_btw_thread_notification(thread_id, &notification)
+        {
+            return;
+        }
+
+        match thread_target {
             ServerNotificationThreadTarget::Thread(thread_id) => {
                 let result = if self.primary_thread_id == Some(thread_id)
                     || self.primary_thread_id.is_none()

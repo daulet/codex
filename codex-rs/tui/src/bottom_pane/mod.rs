@@ -17,6 +17,7 @@ use std::path::PathBuf;
 
 use crate::app_event::ConnectorsSnapshot;
 use crate::app_event_sender::AppEventSender;
+use crate::bottom_pane::btw_panel::BtwPanel;
 use crate::bottom_pane::pending_input_preview::PendingInputPreview;
 use crate::bottom_pane::pending_thread_approvals::PendingThreadApprovals;
 use crate::bottom_pane::unified_exec_footer::UnifiedExecFooter;
@@ -59,6 +60,8 @@ pub(crate) use mcp_server_elicitation::McpServerElicitationFormRequest;
 pub(crate) use mcp_server_elicitation::McpServerElicitationOverlay;
 pub(crate) use request_user_input::RequestUserInputOverlay;
 mod bottom_pane_view;
+mod btw_panel;
+pub(crate) use btw_panel::BtwPanelContent;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct LocalImageAttachment {
@@ -188,6 +191,8 @@ pub(crate) struct BottomPane {
     pending_input_preview: PendingInputPreview,
     /// Inactive threads with pending approval requests.
     pending_thread_approvals: PendingThreadApprovals,
+    /// Sticky `/btw` side-response shown directly above the composer.
+    btw_panel: BtwPanel,
     context_window_percent: Option<i64>,
     context_window_used_tokens: Option<i64>,
 }
@@ -237,6 +242,7 @@ impl BottomPane {
             unified_exec_footer: UnifiedExecFooter::new(),
             pending_input_preview: PendingInputPreview::new(),
             pending_thread_approvals: PendingThreadApprovals::new(),
+            btw_panel: BtwPanel::new(),
             esc_backtrack_hint: false,
             animations_enabled,
             context_window_percent: None,
@@ -414,6 +420,11 @@ impl BottomPane {
             self.request_redraw();
             InputResult::None
         } else {
+            if self.btw_panel.handle_key_event(&key_event) {
+                self.request_redraw();
+                return InputResult::None;
+            }
+
             let is_agent_command = self
                 .composer_text()
                 .lines()
@@ -826,6 +837,16 @@ impl BottomPane {
         }
     }
 
+    /// Set or clear the sticky `/btw` panel content shown above the composer.
+    pub(crate) fn set_btw_panel_content(&mut self, content: Option<BtwPanelContent>) {
+        if let Some(content) = content {
+            self.btw_panel.set_content(content);
+        } else {
+            self.btw_panel.clear();
+        }
+        self.request_redraw();
+    }
+
     #[cfg(test)]
     pub(crate) fn pending_thread_approvals(&self) -> &[String] {
         self.pending_thread_approvals.threads()
@@ -1137,23 +1158,35 @@ impl BottomPane {
             let has_pending_input = !self.pending_input_preview.queued_messages.is_empty()
                 || !self.pending_input_preview.pending_steers.is_empty()
                 || !self.pending_input_preview.rejected_steers.is_empty();
+            let has_btw_panel = self.btw_panel.is_visible();
             let has_status_or_footer =
                 self.status.is_some() || !self.unified_exec_footer.is_empty();
-            let has_inline_previews = has_pending_thread_approvals || has_pending_input;
+            let has_inline_previews =
+                has_pending_thread_approvals || has_pending_input || has_btw_panel;
             if has_inline_previews && has_status_or_footer {
                 flex.push(/*flex*/ 0, RenderableItem::Owned("".into()));
             }
-            flex.push(
-                /*flex*/ 1,
-                RenderableItem::Borrowed(&self.pending_thread_approvals),
-            );
-            if has_pending_thread_approvals && has_pending_input {
+            if has_pending_thread_approvals {
+                flex.push(
+                    /*flex*/ 1,
+                    RenderableItem::Borrowed(&self.pending_thread_approvals),
+                );
+            }
+            if has_pending_thread_approvals && (has_pending_input || has_btw_panel) {
                 flex.push(/*flex*/ 0, RenderableItem::Owned("".into()));
             }
-            flex.push(
-                /*flex*/ 1,
-                RenderableItem::Borrowed(&self.pending_input_preview),
-            );
+            if has_pending_input {
+                flex.push(
+                    /*flex*/ 1,
+                    RenderableItem::Borrowed(&self.pending_input_preview),
+                );
+            }
+            if has_pending_input && has_btw_panel {
+                flex.push(/*flex*/ 0, RenderableItem::Owned("".into()));
+            }
+            if has_btw_panel {
+                flex.push(/*flex*/ 1, RenderableItem::Borrowed(&self.btw_panel));
+            }
             if !has_inline_previews && has_status_or_footer {
                 flex.push(/*flex*/ 0, RenderableItem::Owned("".into()));
             }
@@ -1232,6 +1265,8 @@ mod tests {
     use crate::status_indicator_widget::StatusDetailsCapitalization;
     use codex_protocol::protocol::Op;
     use codex_protocol::protocol::SkillScope;
+    use crossterm::event::KeyCode;
+    use crossterm::event::KeyEvent;
     use crossterm::event::KeyEventKind;
     use crossterm::event::KeyModifiers;
     use insta::assert_snapshot;
@@ -1609,6 +1644,64 @@ mod tests {
             "status_and_queued_messages_snapshot",
             render_snapshot(&pane, area)
         );
+    }
+
+    #[test]
+    fn btw_panel_renders_above_composer_snapshot() {
+        let (tx_raw, _rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let mut pane = BottomPane::new(BottomPaneParams {
+            app_event_tx: tx,
+            frame_requester: FrameRequester::test_dummy(),
+            has_input_focus: true,
+            enhanced_keys_supported: false,
+            placeholder_text: "Ask Codex to do anything".to_string(),
+            disable_paste_burst: false,
+            animations_enabled: true,
+            skills: Some(Vec::new()),
+        });
+
+        pane.set_btw_panel_content(Some(BtwPanelContent::completed(
+            "what path we in".to_string(),
+            "The current working directory is:\n\n/Users/dzhanguzin/dev/personal/codex".to_string(),
+        )));
+
+        let width = 70;
+        let height = pane.desired_height(width);
+        let area = Rect::new(0, 0, width, height);
+        assert_snapshot!(
+            "btw_panel_renders_above_composer_snapshot",
+            render_snapshot(&pane, area)
+        );
+    }
+
+    #[test]
+    fn esc_dismisses_btw_panel_before_interrupting_task() {
+        let (tx_raw, mut rx) = unbounded_channel::<AppEvent>();
+        let tx = AppEventSender::new(tx_raw);
+        let mut pane = BottomPane::new(BottomPaneParams {
+            app_event_tx: tx,
+            frame_requester: FrameRequester::test_dummy(),
+            has_input_focus: true,
+            enhanced_keys_supported: false,
+            placeholder_text: "Ask Codex to do anything".to_string(),
+            disable_paste_burst: false,
+            animations_enabled: true,
+            skills: Some(Vec::new()),
+        });
+        pane.set_task_running(/*running*/ true);
+        pane.set_btw_panel_content(Some(BtwPanelContent::running("status?".to_string())));
+
+        let esc = KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE);
+        assert!(matches!(pane.handle_key_event(esc), InputResult::None));
+
+        assert!(
+            rx.try_recv().is_err(),
+            "Esc should dismiss sticky /btw panel before sending interrupt"
+        );
+
+        let rendered = render_snapshot(&pane, Rect::new(0, 0, 60, pane.desired_height(60)));
+        assert!(!rendered.contains("/btw status?"));
     }
 
     #[test]

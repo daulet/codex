@@ -179,6 +179,11 @@ pub(crate) enum AppEvent {
     /// Result of computing a `/diff` command.
     DiffResult(String),
 
+    /// Start a `/btw` side-question request on an isolated background thread.
+    StartBtw {
+        prompt: String,
+    },
+
     /// Open the app link view in the bottom pane.
     OpenAppLink {
         app_id: String,

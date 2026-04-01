@@ -125,6 +125,7 @@ use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SkillErrorInfo;
 use codex_protocol::protocol::TokenUsage;
+use codex_protocol::user_input::UserInput;
 use codex_terminal_detection::user_agent;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use color_eyre::eyre::Result;
@@ -1010,6 +1011,7 @@ pub(crate) struct App {
     primary_session_configured: Option<ThreadSessionState>,
     pending_primary_events: VecDeque<ThreadBufferedEvent>,
     pending_app_server_requests: PendingAppServerRequests,
+    btw_requests: HashMap<ThreadId, BtwRequestState>,
 }
 
 #[derive(Default)]
@@ -1017,6 +1019,13 @@ struct WindowsSandboxState {
     setup_started_at: Option<Instant>,
     // One-shot suppression of the next world-writable scan after user confirmation.
     skip_world_writable_scan_once: bool,
+}
+
+#[derive(Debug, Clone)]
+struct BtwRequestState {
+    prompt: String,
+    response: Option<String>,
+    error: Option<String>,
 }
 
 fn normalize_harness_overrides_for_cwd(
@@ -1894,8 +1903,126 @@ impl App {
         Ok(())
     }
 
+    async fn start_btw_request(&mut self, app_server: &mut AppServerSession, prompt: String) {
+        let Some(origin_thread_id) = self.active_thread_id.or(self.chat_widget.thread_id()) else {
+            self.chat_widget.show_btw_failed(
+                prompt,
+                "No active thread is available for /btw.".to_string(),
+            );
+            return;
+        };
+        self.chat_widget.show_btw_running(prompt.clone());
+
+        let mut fork_config = self.config.clone();
+        fork_config.ephemeral = true;
+
+        let started = match app_server.fork_thread(fork_config, origin_thread_id).await {
+            Ok(started) => started,
+            Err(err) => {
+                self.chat_widget
+                    .show_btw_failed(prompt, format!("Failed to start /btw: {err}"));
+                return;
+            }
+        };
+
+        let fork_thread_id = started.session.thread_id;
+        self.btw_requests.insert(
+            fork_thread_id,
+            BtwRequestState {
+                prompt: prompt.clone(),
+                response: None,
+                error: None,
+            },
+        );
+
+        let turn_result = app_server
+            .turn_start(
+                fork_thread_id,
+                vec![UserInput::Text {
+                    text: prompt.clone(),
+                    text_elements: Vec::new(),
+                }],
+                started.session.cwd,
+                started.session.approval_policy,
+                started.session.approvals_reviewer,
+                started.session.sandbox_policy,
+                started.session.model,
+                started.session.reasoning_effort,
+                /*summary*/ None,
+                started.session.service_tier.map(Some),
+                /*collaboration_mode*/ None,
+                /*personality*/ None,
+                /*output_schema*/ None,
+            )
+            .await;
+
+        if let Err(err) = turn_result
+            && self.btw_requests.remove(&fork_thread_id).is_some()
+        {
+            self.chat_widget
+                .show_btw_failed(prompt, format!("Failed to submit /btw prompt: {err}"));
+        }
+    }
+
+    fn handle_btw_thread_notification(
+        &mut self,
+        thread_id: ThreadId,
+        notification: &ServerNotification,
+    ) -> bool {
+        let Some(state) = self.btw_requests.get_mut(&thread_id) else {
+            return false;
+        };
+
+        match notification {
+            ServerNotification::ItemCompleted(notification) => {
+                if let ThreadItem::AgentMessage { text, phase, .. } = &notification.item
+                    && matches!(
+                        phase,
+                        Some(codex_protocol::models::MessagePhase::FinalAnswer) | None
+                    )
+                {
+                    state.response = Some(text.clone());
+                }
+            }
+            ServerNotification::Error(notification) => {
+                state.error = Some(notification.error.message.clone());
+            }
+            ServerNotification::TurnCompleted(notification) => {
+                if matches!(notification.turn.status, TurnStatus::Failed)
+                    && let Some(error) = &notification.turn.error
+                {
+                    state.error = Some(error.message.clone());
+                }
+                if let Some(state) = self.btw_requests.remove(&thread_id) {
+                    self.finish_btw_request(state);
+                }
+            }
+            ServerNotification::ThreadClosed(_) => {
+                if let Some(state) = self.btw_requests.remove(&thread_id) {
+                    self.finish_btw_request(state);
+                }
+            }
+            _ => {}
+        }
+
+        true
+    }
+
+    fn finish_btw_request(&mut self, state: BtwRequestState) {
+        if let Some(error) = state.error {
+            self.chat_widget.show_btw_failed(state.prompt, error);
+            return;
+        }
+
+        let response = state
+            .response
+            .filter(|response| !response.trim().is_empty())
+            .unwrap_or_else(|| "No /btw response was returned.".to_string());
+        self.chat_widget.show_btw_completed(state.prompt, response);
+    }
+
     /// Spawn a background task that fetches MCP server status from the app-server
-    /// via paginated RPCs, then delivers the result back through
+    /// app-server via paginated RPCs, then delivers the result back through
     /// `AppEvent::McpInventoryLoaded`.
     ///
     /// The spawned task is fire-and-forget: no `JoinHandle` is stored, so a stale
@@ -3294,6 +3421,8 @@ impl App {
         self.primary_session_configured = None;
         self.pending_primary_events.clear();
         self.pending_app_server_requests.clear();
+        self.btw_requests.clear();
+        self.chat_widget.clear_btw_panel();
         self.chat_widget.set_pending_thread_approvals(Vec::new());
         self.sync_active_agent_label();
     }
@@ -3835,6 +3964,7 @@ impl App {
             primary_session_configured: None,
             pending_primary_events: VecDeque::new(),
             pending_app_server_requests: PendingAppServerRequests::default(),
+            btw_requests: HashMap::new(),
         };
         if let Some(started) = initial_started_thread {
             app.enqueue_primary_thread_session(started.session, started.turns)
@@ -4395,6 +4525,9 @@ impl App {
                     "D I F F".to_string(),
                 ));
                 tui.frame_requester().schedule_frame();
+            }
+            AppEvent::StartBtw { prompt } => {
+                self.start_btw_request(app_server, prompt).await;
             }
             AppEvent::OpenAppLink {
                 app_id,
@@ -6356,6 +6489,7 @@ mod tests {
     use codex_app_server_protocol::HookRunSummary as AppServerHookRunSummary;
     use codex_app_server_protocol::HookScope as AppServerHookScope;
     use codex_app_server_protocol::HookStartedNotification;
+    use codex_app_server_protocol::ItemCompletedNotification;
     use codex_app_server_protocol::JSONRPCErrorError;
     use codex_app_server_protocol::NetworkApprovalContext as AppServerNetworkApprovalContext;
     use codex_app_server_protocol::NetworkApprovalProtocol as AppServerNetworkApprovalProtocol;
@@ -6412,6 +6546,8 @@ mod tests {
     use crossterm::event::KeyModifiers;
     use insta::assert_snapshot;
     use pretty_assertions::assert_eq;
+    use ratatui::buffer::Buffer;
+    use ratatui::layout::Rect;
     use ratatui::prelude::Line;
     use std::path::PathBuf;
     use std::sync::Arc;
@@ -9275,6 +9411,7 @@ guardian_approval = true
             primary_session_configured: None,
             pending_primary_events: VecDeque::new(),
             pending_app_server_requests: PendingAppServerRequests::default(),
+            btw_requests: HashMap::new(),
         }
     }
 
@@ -9332,6 +9469,7 @@ guardian_approval = true
                 primary_session_configured: None,
                 pending_primary_events: VecDeque::new(),
                 pending_app_server_requests: PendingAppServerRequests::default(),
+                btw_requests: HashMap::new(),
             },
             rx,
             op_rx,
@@ -9756,6 +9894,68 @@ guardian_approval = true
         }));
     }
 
+    #[tokio::test]
+    async fn btw_completion_updates_sticky_panel_and_clears_pending_state() {
+        let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+        while app_event_rx.try_recv().is_ok() {}
+        let origin_thread_id = ThreadId::new();
+        let btw_thread_id = ThreadId::new();
+        app.active_thread_id = Some(origin_thread_id);
+        app.btw_requests.insert(
+            btw_thread_id,
+            BtwRequestState {
+                prompt: "what's the status?".to_string(),
+                response: None,
+                error: None,
+            },
+        );
+
+        let consumed = app.handle_btw_thread_notification(
+            btw_thread_id,
+            &ServerNotification::ItemCompleted(ItemCompletedNotification {
+                thread_id: btw_thread_id.to_string(),
+                turn_id: "turn-btw".to_string(),
+                item: ThreadItem::AgentMessage {
+                    id: "assistant-btw".to_string(),
+                    text: "all green".to_string(),
+                    phase: None,
+                    memory_citation: None,
+                },
+            }),
+        );
+        assert!(consumed, "expected /btw item notification to be consumed");
+
+        let consumed = app.handle_btw_thread_notification(
+            btw_thread_id,
+            &turn_completed_notification(btw_thread_id, "turn-btw", TurnStatus::Completed),
+        );
+        assert!(consumed, "expected /btw turn completion to be consumed");
+        assert!(
+            !app.btw_requests.contains_key(&btw_thread_id),
+            "completed /btw request should be removed from pending state"
+        );
+
+        assert!(
+            app_event_rx.try_recv().is_err(),
+            "expected /btw completion to update sticky panel without emitting history cells"
+        );
+
+        let rendered =
+            render_widget_to_string(&app.chat_widget, /*width*/ 100, /*height*/ 12);
+        assert!(
+            rendered.contains("/btw what's the status?"),
+            "unexpected widget render: {rendered}"
+        );
+        assert!(
+            rendered.contains("all green"),
+            "unexpected widget render: {rendered}"
+        );
+        assert!(
+            rendered.contains("Space, Enter, or Escape to dismiss"),
+            "unexpected widget render: {rendered}"
+        );
+    }
+
     fn next_user_turn_op(op_rx: &mut tokio::sync::mpsc::UnboundedReceiver<Op>) -> Op {
         let mut seen = Vec::new();
         while let Ok(op) = op_rx.try_recv() {
@@ -9778,6 +9978,21 @@ guardian_approval = true
             })
             .collect::<Vec<_>>()
             .join("\n")
+    }
+
+    fn render_widget_to_string(widget: &impl Renderable, width: u16, height: u16) -> String {
+        let area = Rect::new(0, 0, width, height);
+        let mut buf = Buffer::empty(area);
+        widget.render(area, &mut buf);
+        let mut rows = Vec::new();
+        for y in 0..height {
+            let mut row = String::new();
+            for x in 0..width {
+                row.push(buf[(x, y)].symbol().chars().next().unwrap_or(' '));
+            }
+            rows.push(row);
+        }
+        rows.join("\n")
     }
 
     fn test_session_telemetry(config: &Config, model: &str) -> SessionTelemetry {

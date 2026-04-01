@@ -301,6 +301,7 @@ use crate::app_event_sender::AppEventSender;
 use crate::bottom_pane::ApprovalRequest;
 use crate::bottom_pane::BottomPane;
 use crate::bottom_pane::BottomPaneParams;
+use crate::bottom_pane::BtwPanelContent;
 use crate::bottom_pane::CancellationEvent;
 use crate::bottom_pane::CollaborationModeIndicator;
 use crate::bottom_pane::ColumnWidthMode;
@@ -5252,6 +5253,9 @@ impl ChatWidget {
             SlashCommand::Review => {
                 self.open_review_popup();
             }
+            SlashCommand::Btw => {
+                self.add_error_message("Usage: /btw <question>".to_string());
+            }
             SlashCommand::Rename => {
                 self.session_telemetry
                     .counter("codex.thread.rename", /*inc*/ 1, &[]);
@@ -5624,6 +5628,18 @@ impl ChatWidget {
                     },
                     user_facing_hint: None,
                 }));
+                self.bottom_pane.drain_pending_submission_state();
+            }
+            SlashCommand::Btw if !trimmed.is_empty() => {
+                let Some((prepared_args, _prepared_elements)) = self
+                    .bottom_pane
+                    .prepare_inline_args_submission(/*record_history*/ false)
+                else {
+                    return;
+                };
+                self.app_event_tx.send(AppEvent::StartBtw {
+                    prompt: prepared_args,
+                });
                 self.bottom_pane.drain_pending_submission_state();
             }
             SlashCommand::Resume if !trimmed.is_empty() => {
@@ -7498,6 +7514,25 @@ impl ChatWidget {
 
     pub(crate) fn set_pending_thread_approvals(&mut self, threads: Vec<String>) {
         self.bottom_pane.set_pending_thread_approvals(threads);
+    }
+
+    pub(crate) fn show_btw_running(&mut self, question: String) {
+        self.bottom_pane
+            .set_btw_panel_content(Some(BtwPanelContent::running(question)));
+    }
+
+    pub(crate) fn show_btw_completed(&mut self, question: String, response: String) {
+        self.bottom_pane
+            .set_btw_panel_content(Some(BtwPanelContent::completed(question, response)));
+    }
+
+    pub(crate) fn show_btw_failed(&mut self, question: String, error: String) {
+        self.bottom_pane
+            .set_btw_panel_content(Some(BtwPanelContent::failed(question, error)));
+    }
+
+    pub(crate) fn clear_btw_panel(&mut self) {
+        self.bottom_pane.set_btw_panel_content(None);
     }
 
     pub(crate) fn add_diff_in_progress(&mut self) {
