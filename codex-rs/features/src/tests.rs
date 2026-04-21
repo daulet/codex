@@ -98,6 +98,22 @@ fn guardian_approval_is_experimental_and_user_toggleable() {
 }
 
 #[test]
+fn away_summary_is_experimental_and_user_toggleable() {
+    let spec = Feature::AwaySummary.info();
+    let stage = spec.stage;
+
+    assert!(matches!(stage, Stage::Experimental { .. }));
+    assert_eq!(stage.experimental_menu_name(), Some("Away summary"));
+    assert_eq!(
+        stage.experimental_menu_description(),
+        Some(
+            "Generate a short catch-up note when you return after leaving the terminal unfocused during a thread."
+        )
+    );
+    assert_eq!(Feature::AwaySummary.default_enabled(), false);
+}
+
+#[test]
 fn request_permissions_is_under_development() {
     assert_eq!(
         Feature::ExecPermissionApprovals.stage(),

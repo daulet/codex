@@ -391,6 +391,7 @@ const USER_SHELL_COMMAND_HELP_TITLE: &str = "Prefix a command with ! to run it l
 const USER_SHELL_COMMAND_HELP_HINT: &str = "Example: !ls";
 const DEFAULT_OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
 const DEFAULT_STATUS_LINE_ITEMS: [&str; 2] = ["model-with-reasoning", "current-dir"];
+const AWAY_SUMMARY_DELAY: Duration = Duration::from_secs(5 * 60);
 // Track information about an in-flight exec command.
 struct RunningCommand {
     command: Vec<String>,
@@ -403,6 +404,31 @@ struct UnifiedExecProcessSummary {
     call_id: String,
     command_display: String,
     recent_chunks: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct AwaySummaryState {
+    focused: bool,
+    due_at: Option<Instant>,
+    pending_after_turn: bool,
+    request_in_flight: Option<u64>,
+    next_request_id: u64,
+    user_turn_seen: bool,
+    summary_since_last_user_turn: bool,
+}
+
+impl Default for AwaySummaryState {
+    fn default() -> Self {
+        Self {
+            focused: true,
+            due_at: None,
+            pending_after_turn: false,
+            request_in_flight: None,
+            next_request_id: 1,
+            user_turn_seen: false,
+            summary_since_last_user_turn: false,
+        }
+    }
 }
 
 struct UnifiedExecWaitState {
@@ -888,6 +914,8 @@ pub(crate) struct ChatWidget {
     queued_message_edit_binding: KeyBinding,
     // Pending notification to show when unfocused on next Draw
     pending_notification: Option<Notification>,
+    // State for optional model-generated summaries after the terminal has been unfocused.
+    away_summary: AwaySummaryState,
     /// When `Some`, the user has pressed a quit shortcut and the second press
     /// must occur before `quit_shortcut_expires_at`.
     quit_shortcut_expires_at: Option<Instant>,
@@ -2427,6 +2455,9 @@ impl ChatWidget {
         }
         // If there is a queued user message, send exactly one now to begin the next turn.
         self.maybe_send_next_queued_input();
+        if !from_replay {
+            self.maybe_start_pending_away_summary();
+        }
         // Emit a notification when the turn completes (suppressed if focused).
         self.notify(Notification::AgentTurnComplete {
             response: notification_response,
@@ -4174,9 +4205,108 @@ impl ChatWidget {
     pub(crate) fn pre_draw_tick(&mut self) {
         self.update_due_hook_visibility();
         self.schedule_hook_timer_if_needed();
+        self.maybe_start_due_away_summary();
         self.bottom_pane.pre_draw_tick();
         if self.should_animate_terminal_title_spinner() {
             self.refresh_terminal_title();
+        }
+    }
+
+    pub(crate) fn handle_focus_lost(&mut self) {
+        self.away_summary.focused = false;
+        self.schedule_away_summary_timer_if_needed();
+    }
+
+    pub(crate) fn handle_focus_gained(&mut self) {
+        self.away_summary.focused = true;
+        self.maybe_start_due_away_summary();
+    }
+
+    fn away_summary_enabled(&self) -> bool {
+        self.config.features.enabled(Feature::AwaySummary)
+    }
+
+    fn can_request_away_summary(&self) -> bool {
+        self.away_summary_enabled()
+            && self.is_session_configured()
+            && self.away_summary.user_turn_seen
+            && !self.away_summary.summary_since_last_user_turn
+            && self.away_summary.request_in_flight.is_none()
+    }
+
+    fn schedule_away_summary_timer_if_needed(&mut self) {
+        if self.away_summary.focused
+            || !self.can_request_away_summary()
+            || self.away_summary.due_at.is_some()
+        {
+            return;
+        }
+        let due_at = Instant::now() + AWAY_SUMMARY_DELAY;
+        self.away_summary.due_at = Some(due_at);
+        self.frame_requester.schedule_frame_in(AWAY_SUMMARY_DELAY);
+    }
+
+    fn maybe_start_due_away_summary(&mut self) {
+        let Some(due_at) = self.away_summary.due_at else {
+            return;
+        };
+        let now = Instant::now();
+        if now < due_at {
+            self.frame_requester.schedule_frame_in(due_at - now);
+            return;
+        }
+
+        self.away_summary.due_at = None;
+        if self.bottom_pane.is_task_running() {
+            if self.can_request_away_summary() {
+                self.away_summary.pending_after_turn = true;
+            }
+            return;
+        }
+        self.start_away_summary_request();
+    }
+
+    fn maybe_start_pending_away_summary(&mut self) {
+        if !self.away_summary.pending_after_turn {
+            return;
+        }
+        self.away_summary.pending_after_turn = false;
+        if self.bottom_pane.is_task_running() {
+            if self.can_request_away_summary() {
+                self.away_summary.pending_after_turn = true;
+            }
+            return;
+        }
+        self.start_away_summary_request();
+    }
+
+    fn start_away_summary_request(&mut self) {
+        if !self.can_request_away_summary() {
+            return;
+        }
+        let request_id = self.away_summary.next_request_id;
+        self.away_summary.next_request_id = self.away_summary.next_request_id.wrapping_add(1);
+        self.away_summary.request_in_flight = Some(request_id);
+        self.app_event_tx
+            .send(AppEvent::StartAwaySummary { request_id });
+    }
+
+    fn note_user_turn_for_away_summary(&mut self) {
+        self.away_summary.user_turn_seen = true;
+        self.away_summary.summary_since_last_user_turn = false;
+    }
+
+    fn note_user_submission_for_away_summary(&mut self) {
+        self.note_user_turn_for_away_summary();
+        self.away_summary.pending_after_turn = false;
+        self.away_summary.due_at = None;
+        self.cancel_away_summary_request();
+        self.schedule_away_summary_timer_if_needed();
+    }
+
+    fn cancel_away_summary_request(&mut self) {
+        if self.away_summary.request_in_flight.take().is_some() {
+            self.app_event_tx.send(AppEvent::CancelAwaySummary);
         }
     }
 
@@ -4840,6 +4970,7 @@ impl ChatWidget {
             suppress_session_configured_redraw: false,
             suppress_initial_user_message_submit: false,
             pending_notification: None,
+            away_summary: AwaySummaryState::default(),
             quit_shortcut_expires_at: None,
             quit_shortcut_key: None,
             is_review_mode: false,
@@ -5979,6 +6110,7 @@ impl ChatWidget {
         if !self.submit_op(op) {
             return;
         }
+        self.note_user_submission_for_away_summary();
 
         // Persist the text to cross-session message history. Mentions are
         // encoded into placeholder syntax so recall can reconstruct the
@@ -7395,6 +7527,7 @@ impl ChatWidget {
     }
 
     fn on_user_message_event(&mut self, event: UserMessageEvent) {
+        self.note_user_turn_for_away_summary();
         self.last_rendered_user_message_event =
             Some(Self::rendered_user_message_event_from_event(&event));
         let remote_image_urls = event.images.unwrap_or_default();
@@ -7533,6 +7666,50 @@ impl ChatWidget {
 
     pub(crate) fn clear_btw_panel(&mut self) {
         self.bottom_pane.set_btw_panel_content(None);
+    }
+
+    pub(crate) fn reset_away_summary_state(&mut self) {
+        self.away_summary = AwaySummaryState::default();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_away_summary_test_state(
+        &mut self,
+        thread_id: ThreadId,
+        request_id: u64,
+        focused: bool,
+    ) {
+        self.thread_id = Some(thread_id);
+        self.away_summary.focused = focused;
+        self.away_summary.request_in_flight = Some(request_id);
+        self.away_summary.user_turn_seen = true;
+    }
+
+    pub(crate) fn show_away_summary_completed(&mut self, request_id: u64, summary: String) {
+        if self.away_summary.request_in_flight != Some(request_id) {
+            return;
+        }
+        self.away_summary.request_in_flight = None;
+
+        let summary = summary.trim();
+        if summary.is_empty()
+            || !self.away_summary_enabled()
+            || self.away_summary.summary_since_last_user_turn
+        {
+            return;
+        }
+
+        self.add_to_history(history_cell::new_away_summary(summary.to_string()));
+        self.away_summary.summary_since_last_user_turn = true;
+        self.away_summary.pending_after_turn = false;
+        self.away_summary.due_at = None;
+        self.request_redraw();
+    }
+
+    pub(crate) fn finish_away_summary_request(&mut self, request_id: u64) {
+        if self.away_summary.request_in_flight == Some(request_id) {
+            self.away_summary.request_in_flight = None;
+        }
     }
 
     pub(crate) fn add_diff_in_progress(&mut self) {
@@ -9618,6 +9795,15 @@ impl ChatWidget {
             self.turn_sleep_inhibitor = SleepInhibitor::new(enabled);
             self.turn_sleep_inhibitor
                 .set_turn_running(self.agent_turn_running);
+        }
+        if feature == Feature::AwaySummary {
+            if enabled {
+                self.schedule_away_summary_timer_if_needed();
+            } else {
+                self.away_summary.due_at = None;
+                self.away_summary.pending_after_turn = false;
+                self.cancel_away_summary_request();
+            }
         }
         #[cfg(target_os = "windows")]
         if matches!(

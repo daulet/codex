@@ -184,6 +184,14 @@ pub(crate) enum AppEvent {
         prompt: String,
     },
 
+    /// Start an away-summary request on an isolated background thread.
+    StartAwaySummary {
+        request_id: u64,
+    },
+
+    /// Cancel any in-flight away-summary request.
+    CancelAwaySummary,
+
     /// Open the app link view in the bottom pane.
     OpenAppLink {
         app_id: String,

@@ -2165,6 +2165,14 @@ pub(crate) fn new_info_event(message: String, hint: Option<String>) -> PlainHist
     PlainHistoryCell { lines }
 }
 
+pub(crate) fn new_away_summary(summary: String) -> PrefixedWrappedHistoryCell {
+    let lines = summary
+        .lines()
+        .map(|line| Line::from(line.to_string().dim()))
+        .collect::<Vec<_>>();
+    PrefixedWrappedHistoryCell::new(Text::from(lines), "• ".dim(), "  ")
+}
+
 pub(crate) fn new_error_event(message: String) -> PlainHistoryCell {
     // Use a hair space (U+200A) to create a subtle, near-invisible separation
     // before the text. VS16 is intentionally omitted to keep spacing tighter

@@ -274,6 +274,8 @@ fn set_panic_hook() {
 pub enum TuiEvent {
     Key(KeyEvent),
     Paste(String),
+    FocusGained,
+    FocusLost,
     Draw,
 }
 

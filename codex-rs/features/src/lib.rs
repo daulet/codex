@@ -176,6 +176,8 @@ pub enum Feature {
     FastMode,
     /// Enable experimental realtime voice conversation mode in the TUI.
     RealtimeConversation,
+    /// Generate a short TUI summary after the terminal has been unfocused.
+    AwaySummary,
     /// Connect app-server to the ChatGPT remote control service.
     RemoteControl,
     /// Removed compatibility flag. The TUI now always uses the app-server implementation.
@@ -865,6 +867,16 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::RealtimeConversation,
         key: "realtime_conversation",
         stage: Stage::UnderDevelopment,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::AwaySummary,
+        key: "away_summary",
+        stage: Stage::Experimental {
+            name: "Away summary",
+            menu_description: "Generate a short catch-up note when you return after leaving the terminal unfocused during a thread.",
+            announcement: "NEW: Away summary is now available in /experimental. Enable it to get a short catch-up note after stepping away from Codex.",
+        },
         default_enabled: false,
     },
     FeatureSpec {

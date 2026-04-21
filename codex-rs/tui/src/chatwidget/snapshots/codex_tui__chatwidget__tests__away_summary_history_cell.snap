@@ -1,0 +1,6 @@
+---
+source: tui/src/chatwidget/tests/away_summary.rs
+expression: rendered
+---
+• You are implementing away summaries in the TUI. Next, wire the focus timer
+  into the background request.

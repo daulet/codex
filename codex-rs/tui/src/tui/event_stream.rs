@@ -176,7 +176,7 @@ impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
     /// a mapped event, hits `Pending`, or sees EOF/error. When the broker is paused, it drops
     /// the underlying stream and returns `Pending` to fully release stdin.
     pub fn poll_crossterm_event(&mut self, cx: &mut Context<'_>) -> Poll<Option<TuiEvent>> {
-        // Some crossterm events map to None (e.g. FocusLost, mouse); loop so we keep polling
+        // Some crossterm events map to None (e.g. mouse); loop so we keep polling
         // until we return a mapped event, hit Pending, or see EOF/error.
         loop {
             let poll_result = {
@@ -249,11 +249,11 @@ impl<S: EventSource + Default + Unpin> TuiEventStream<S> {
             Event::FocusGained => {
                 self.terminal_focused.store(true, Ordering::Relaxed);
                 crate::terminal_palette::requery_default_colors();
-                Some(TuiEvent::Draw)
+                Some(TuiEvent::FocusGained)
             }
             Event::FocusLost => {
                 self.terminal_focused.store(false, Ordering::Relaxed);
-                None
+                Some(TuiEvent::FocusLost)
             }
             _ => None,
         }
@@ -389,23 +389,24 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn key_event_skips_unmapped() {
+    async fn focus_events_are_emitted() {
         let (broker, handle, _draw_tx, draw_rx, terminal_focused) = setup();
         let mut stream = make_stream(broker, draw_rx, terminal_focused);
 
         handle.send(Ok(Event::FocusLost));
+        handle.send(Ok(Event::FocusGained));
         handle.send(Ok(Event::Key(KeyEvent::new(
             KeyCode::Char('a'),
             KeyModifiers::NONE,
         ))));
 
-        let next = stream.next().await.unwrap();
-        match next {
-            TuiEvent::Key(key) => {
-                assert_eq!(key, KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE));
-            }
-            other => panic!("expected key event, got {other:?}"),
-        }
+        assert!(matches!(stream.next().await, Some(TuiEvent::FocusLost)));
+        assert!(matches!(stream.next().await, Some(TuiEvent::FocusGained)));
+        assert!(matches!(
+            stream.next().await,
+            Some(TuiEvent::Key(key))
+                if key == KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)
+        ));
     }
 
     #[tokio::test(flavor = "current_thread")]

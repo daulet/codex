@@ -257,6 +257,7 @@ pub(super) async fn make_chatwidget_manual(
         suppress_session_configured_redraw: false,
         suppress_initial_user_message_submit: false,
         pending_notification: None,
+        away_summary: AwaySummaryState::default(),
         quit_shortcut_expires_at: None,
         quit_shortcut_key: None,
         is_review_mode: false,

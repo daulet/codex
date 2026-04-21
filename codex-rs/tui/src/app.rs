@@ -160,12 +160,14 @@ use uuid::Uuid;
 mod agent_navigation;
 mod app_server_adapter;
 mod app_server_requests;
+mod away_summary;
 mod loaded_threads;
 mod pending_interactive_replay;
 
 use self::agent_navigation::AgentNavigationDirection;
 use self::agent_navigation::AgentNavigationState;
 use self::app_server_requests::PendingAppServerRequests;
+use self::away_summary::AwaySummaryRequestState;
 use self::loaded_threads::find_loaded_subagent_threads_for_primary;
 use self::pending_interactive_replay::PendingInteractiveReplayState;
 
@@ -1012,6 +1014,7 @@ pub(crate) struct App {
     pending_primary_events: VecDeque<ThreadBufferedEvent>,
     pending_app_server_requests: PendingAppServerRequests,
     btw_requests: HashMap<ThreadId, BtwRequestState>,
+    away_summary_requests: HashMap<ThreadId, AwaySummaryRequestState>,
 }
 
 #[derive(Default)]
@@ -3422,7 +3425,9 @@ impl App {
         self.pending_primary_events.clear();
         self.pending_app_server_requests.clear();
         self.btw_requests.clear();
+        self.away_summary_requests.clear();
         self.chat_widget.clear_btw_panel();
+        self.chat_widget.reset_away_summary_state();
         self.chat_widget.set_pending_thread_approvals(Vec::new());
         self.sync_active_agent_label();
     }
@@ -3965,6 +3970,7 @@ impl App {
             pending_primary_events: VecDeque::new(),
             pending_app_server_requests: PendingAppServerRequests::default(),
             btw_requests: HashMap::new(),
+            away_summary_requests: HashMap::new(),
         };
         if let Some(started) = initial_started_thread {
             app.enqueue_primary_thread_session(started.session, started.turns)
@@ -4134,6 +4140,19 @@ impl App {
             }
         }
 
+        match &event {
+            TuiEvent::FocusGained => {
+                self.chat_widget.handle_focus_gained();
+                tui.frame_requester().schedule_frame();
+                return Ok(AppRunControl::Continue);
+            }
+            TuiEvent::FocusLost => {
+                self.chat_widget.handle_focus_lost();
+                return Ok(AppRunControl::Continue);
+            }
+            TuiEvent::Key(_) | TuiEvent::Paste(_) | TuiEvent::Draw => {}
+        }
+
         if self.overlay.is_some() {
             let _ = self.handle_backtrack_overlay_event(tui, event).await?;
         } else {
@@ -4148,6 +4167,13 @@ impl App {
                     // [iTerm2]: https://github.com/gnachman/iTerm2/blob/5d0c0d9f68523cbd0494dad5422998964a2ecd8d/sources/iTermPasteHelper.m#L206-L216
                     let pasted = pasted.replace("\r", "\n");
                     self.chat_widget.handle_paste(pasted);
+                }
+                TuiEvent::FocusGained => {
+                    self.chat_widget.handle_focus_gained();
+                    tui.frame_requester().schedule_frame();
+                }
+                TuiEvent::FocusLost => {
+                    self.chat_widget.handle_focus_lost();
                 }
                 TuiEvent::Draw => {
                     if self.backtrack_render_pending {
@@ -4528,6 +4554,13 @@ impl App {
             }
             AppEvent::StartBtw { prompt } => {
                 self.start_btw_request(app_server, prompt).await;
+            }
+            AppEvent::StartAwaySummary { request_id } => {
+                self.start_away_summary_request(app_server, request_id)
+                    .await;
+            }
+            AppEvent::CancelAwaySummary => {
+                self.cancel_away_summary_requests(app_server).await;
             }
             AppEvent::OpenAppLink {
                 app_id,
@@ -6516,6 +6549,7 @@ mod tests {
     use codex_config::types::ModelAvailabilityNuxConfig;
     use codex_core::config::ConfigBuilder;
     use codex_core::config::ConfigOverrides;
+    use codex_features::Feature;
     use codex_otel::SessionTelemetry;
     use codex_protocol::ThreadId;
     use codex_protocol::config_types::CollaborationMode;
@@ -9412,6 +9446,7 @@ guardian_approval = true
             pending_primary_events: VecDeque::new(),
             pending_app_server_requests: PendingAppServerRequests::default(),
             btw_requests: HashMap::new(),
+            away_summary_requests: HashMap::new(),
         }
     }
 
@@ -9470,6 +9505,7 @@ guardian_approval = true
                 pending_primary_events: VecDeque::new(),
                 pending_app_server_requests: PendingAppServerRequests::default(),
                 btw_requests: HashMap::new(),
+                away_summary_requests: HashMap::new(),
             },
             rx,
             op_rx,
@@ -9953,6 +9989,77 @@ guardian_approval = true
         assert!(
             rendered.contains("Space, Enter, or Escape to dismiss"),
             "unexpected widget render: {rendered}"
+        );
+    }
+
+    #[tokio::test]
+    async fn away_summary_completion_inserts_history_and_clears_pending_state() {
+        let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+        while app_event_rx.try_recv().is_ok() {}
+        app.chat_widget
+            .set_feature_enabled(Feature::AwaySummary, /*enabled*/ true);
+        let origin_thread_id = ThreadId::new();
+        let away_thread_id = ThreadId::new();
+        app.active_thread_id = Some(origin_thread_id);
+        app.chat_widget.set_away_summary_test_state(
+            origin_thread_id,
+            /*request_id*/ 42,
+            /*focused*/ false,
+        );
+        app.away_summary_requests.insert(
+            away_thread_id,
+            AwaySummaryRequestState {
+                request_id: 42,
+                turn_id: None,
+                response: None,
+                error: None,
+                cancelled: false,
+            },
+        );
+
+        let consumed = app.handle_away_summary_thread_notification(
+            away_thread_id,
+            &ServerNotification::ItemCompleted(ItemCompletedNotification {
+                thread_id: away_thread_id.to_string(),
+                turn_id: "turn-away".to_string(),
+                item: ThreadItem::AgentMessage {
+                    id: "assistant-away".to_string(),
+                    text: "You are implementing away summaries. Next, finish the focus timer."
+                        .to_string(),
+                    phase: None,
+                    memory_citation: None,
+                },
+            }),
+        );
+        assert!(
+            consumed,
+            "expected away summary item notification to be consumed"
+        );
+
+        let consumed = app.handle_away_summary_thread_notification(
+            away_thread_id,
+            &turn_completed_notification(away_thread_id, "turn-away", TurnStatus::Completed),
+        );
+        assert!(
+            consumed,
+            "expected away summary completion notification to be consumed"
+        );
+        assert!(
+            !app.away_summary_requests.contains_key(&away_thread_id),
+            "completed away summary request should be removed from pending state"
+        );
+
+        let mut rendered_cells = Vec::new();
+        while let Ok(event) = app_event_rx.try_recv() {
+            if let AppEvent::InsertHistoryCell(cell) = event {
+                rendered_cells.push(lines_to_single_string(&cell.display_lines(/*width*/ 120)));
+            }
+        }
+        assert_eq!(
+            rendered_cells,
+            vec![
+                "• You are implementing away summaries. Next, finish the focus timer.".to_string()
+            ]
         );
     }
 

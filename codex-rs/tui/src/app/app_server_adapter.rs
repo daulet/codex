@@ -189,6 +189,11 @@ impl App {
 
         let thread_target = server_notification_thread_target(&notification);
         if let ServerNotificationThreadTarget::Thread(thread_id) = thread_target
+            && self.handle_away_summary_thread_notification(thread_id, &notification)
+        {
+            return;
+        }
+        if let ServerNotificationThreadTarget::Thread(thread_id) = thread_target
             && self.handle_btw_thread_notification(thread_id, &notification)
         {
             return;
