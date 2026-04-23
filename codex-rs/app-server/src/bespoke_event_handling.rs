@@ -50,8 +50,10 @@ use codex_app_server_protocol::RequestId;
 use codex_app_server_protocol::ServerNotification;
 use codex_app_server_protocol::ServerRequestPayload;
 use codex_app_server_protocol::SkillsChangedNotification;
+use codex_app_server_protocol::Thread;
 use codex_app_server_protocol::ThreadGoalUpdatedNotification;
 use codex_app_server_protocol::ThreadItem;
+use codex_app_server_protocol::ThreadNavigateResponse;
 use codex_app_server_protocol::ThreadRealtimeClosedNotification;
 use codex_app_server_protocol::ThreadRealtimeErrorNotification;
 use codex_app_server_protocol::ThreadRealtimeItemAddedNotification;
@@ -894,8 +896,8 @@ pub(crate) async fn apply_bespoke_event_handling(
 
             let message = ev.message.clone();
             let codex_error_info = ev.codex_error_info.clone();
-            // If this error belongs to an in-flight `thread/rollback` request, fail that request
-            // (and clear pending state) so subsequent rollbacks are unblocked.
+            // If this error belongs to in-flight thread history navigation, fail that request
+            // (and clear pending state) so subsequent navigation is unblocked.
             //
             // Don't send a notification for this error.
             if matches!(
@@ -1193,6 +1195,72 @@ pub(crate) async fn apply_bespoke_event_handling(
                 };
 
                 outgoing.send_response(request_id, response).await;
+            }
+        }
+        EventMsg::ThreadNavigated(_) => {
+            let pending = {
+                let mut state = thread_state.lock().await;
+                state.pending_thread_navigation.take()
+            };
+
+            if let Some(request_id) = pending {
+                let _thread_list_state_permit = match thread_list_state_permit.acquire().await {
+                    Ok(permit) => permit,
+                    Err(err) => {
+                        outgoing
+                            .send_error(
+                                request_id,
+                                internal_error(format!(
+                                    "failed to acquire thread list state permit: {err}"
+                                )),
+                            )
+                            .await;
+                        return;
+                    }
+                };
+                let fallback_cwd = conversation.config_snapshot().await.cwd;
+                let stored_thread = match conversation
+                    .read_thread(
+                        /*include_archived*/ true, /*include_history*/ true,
+                    )
+                    .await
+                {
+                    Ok(stored_thread) => stored_thread,
+                    Err(err) => {
+                        outgoing
+                            .send_error(
+                                request_id.clone(),
+                                internal_error(format!(
+                                    "failed to read thread {conversation_id} after navigation: {err}"
+                                )),
+                            )
+                            .await;
+                        return;
+                    }
+                };
+                let loaded_status = thread_watch_manager
+                    .loaded_status_for_thread(&conversation_id.to_string())
+                    .await;
+                let thread = match thread_from_history_navigation_stored_thread(
+                    stored_thread,
+                    conversation.session_configured().session_id.to_string(),
+                    fallback_model_provider.as_str(),
+                    &fallback_cwd,
+                    loaded_status,
+                    "navigation",
+                ) {
+                    Ok(thread) => thread,
+                    Err(err) => {
+                        outgoing
+                            .send_error(request_id.clone(), internal_error(err))
+                            .await;
+                        return;
+                    }
+                };
+
+                outgoing
+                    .send_response(request_id, ThreadNavigateResponse { thread })
+                    .await;
             }
         }
         EventMsg::ThreadGoalUpdated(thread_goal_event) => {
@@ -1512,9 +1580,15 @@ async fn handle_thread_rollback_failed(
     thread_state: &Arc<Mutex<ThreadState>>,
     outgoing: &ThreadScopedOutgoingMessageSender,
 ) {
-    let pending_rollback = thread_state.lock().await.pending_rollbacks.take();
+    let pending_request = {
+        let mut state = thread_state.lock().await;
+        state
+            .pending_rollbacks
+            .take()
+            .or_else(|| state.pending_thread_navigation.take())
+    };
 
-    if let Some(request_id) = pending_rollback {
+    if let Some(request_id) = pending_request {
         outgoing
             .send_error(request_id, invalid_request(message))
             .await;
@@ -1528,18 +1602,37 @@ fn thread_rollback_response_from_stored_thread(
     fallback_cwd: &AbsolutePathBuf,
     loaded_status: ThreadStatus,
 ) -> std::result::Result<ThreadRollbackResponse, String> {
+    let thread = thread_from_history_navigation_stored_thread(
+        stored_thread,
+        session_id,
+        fallback_model_provider,
+        fallback_cwd,
+        loaded_status,
+        "rollback",
+    )?;
+    Ok(ThreadRollbackResponse { thread })
+}
+
+fn thread_from_history_navigation_stored_thread(
+    stored_thread: codex_thread_store::StoredThread,
+    session_id: String,
+    fallback_model_provider: &str,
+    fallback_cwd: &AbsolutePathBuf,
+    loaded_status: ThreadStatus,
+    operation: &str,
+) -> std::result::Result<Thread, String> {
     let thread_id = stored_thread.thread_id;
     let (mut thread, history) =
         thread_from_stored_thread(stored_thread, fallback_model_provider, fallback_cwd);
     thread.session_id = session_id;
     let Some(history) = history else {
         return Err(format!(
-            "thread {thread_id} did not include persisted history after rollback"
+            "thread {thread_id} did not include persisted history after {operation}"
         ));
     };
     populate_thread_turns_from_history(&mut thread, &history.items, /*active_turn*/ None);
     thread.status = loaded_status;
-    Ok(ThreadRollbackResponse { thread })
+    Ok(thread)
 }
 
 async fn respond_to_pending_interrupts(

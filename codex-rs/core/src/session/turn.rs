@@ -1468,6 +1468,7 @@ pub(super) fn realtime_text_for_event(msg: &EventMsg) -> Option<String> {
         | EventMsg::ModelVerification(_)
         | EventMsg::ContextCompacted(_)
         | EventMsg::ThreadRolledBack(_)
+        | EventMsg::ThreadNavigated(_)
         | EventMsg::TurnStarted(_)
         | EventMsg::TurnComplete(_)
         | EventMsg::TokenCount(_)

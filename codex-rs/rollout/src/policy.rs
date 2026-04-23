@@ -103,6 +103,7 @@ fn event_msg_persistence_mode(ev: &EventMsg) -> Option<EventPersistenceMode> {
         | EventMsg::ExitedReviewMode(_)
         | EventMsg::McpToolCallEnd(_)
         | EventMsg::ThreadRolledBack(_)
+        | EventMsg::ThreadNavigated(_)
         | EventMsg::TurnAborted(_)
         | EventMsg::TurnStarted(_)
         | EventMsg::TurnComplete(_)

@@ -373,6 +373,7 @@ async fn run_codex_tool_session_inner(
                     | EventMsg::ContextCompacted(_)
                     | EventMsg::ModelReroute(_)
                     | EventMsg::ThreadRolledBack(_)
+                    | EventMsg::ThreadNavigated(_)
                     | EventMsg::CollabAgentSpawnBegin(_)
                     | EventMsg::CollabAgentSpawnEnd(_)
                     | EventMsg::CollabAgentInteractionBegin(_)

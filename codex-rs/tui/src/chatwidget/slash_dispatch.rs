@@ -154,6 +154,9 @@ impl ChatWidget {
             SlashCommand::Fork => {
                 self.app_event_tx.send(AppEvent::ForkCurrentSession);
             }
+            SlashCommand::Tree => {
+                self.app_event_tx.send(AppEvent::OpenThreadTree);
+            }
             SlashCommand::Init => {
                 let init_target = self.config.cwd.join(DEFAULT_AGENTS_MD_FILENAME);
                 if init_target.exists() {
@@ -918,6 +921,7 @@ impl ChatWidget {
             | SlashCommand::Clear
             | SlashCommand::Resume
             | SlashCommand::Fork
+            | SlashCommand::Tree
             | SlashCommand::Init
             | SlashCommand::Compact
             | SlashCommand::Review
