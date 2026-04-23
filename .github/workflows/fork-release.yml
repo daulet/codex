@@ -1,0 +1,257 @@
+name: fork-release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+      - "codex-v*.*.*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to publish. Defaults to v<Cargo.toml version>."
+        required: false
+
+concurrency:
+  group: fork-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  metadata:
+    name: Release metadata
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
+      deb_version: ${{ steps.metadata.outputs.deb_version }}
+      release_tag: ${{ steps.metadata.outputs.release_tag }}
+      repo: ${{ steps.metadata.outputs.repo }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - id: metadata
+        name: Resolve release metadata
+        shell: bash
+        env:
+          REQUESTED_RELEASE_TAG: ${{ github.event.inputs.release_tag || '' }}
+        run: |
+          set -euo pipefail
+
+          cargo_version="$(sed -n 's/^version = "\(.*\)"/\1/p' codex-rs/Cargo.toml | head -n 1)"
+          release_tag="$REQUESTED_RELEASE_TAG"
+
+          if [[ -z "$release_tag" && "$GITHUB_REF_TYPE" == "tag" ]]; then
+            release_tag="$GITHUB_REF_NAME"
+          fi
+          if [[ -z "$release_tag" ]]; then
+            release_tag="v${cargo_version}"
+          fi
+
+          version="$release_tag"
+          version="${version#codex-v}"
+          version="${version#rust-v}"
+          version="${version#v}"
+
+          if [[ -z "$version" ]]; then
+            echo "Unable to derive version from release tag: $release_tag" >&2
+            exit 1
+          fi
+
+          # Debian prereleases sort naturally when hyphenated semver suffixes are mapped to '~'.
+          deb_version="${version//-/~}"
+
+          {
+            echo "version=$version"
+            echo "deb_version=$deb_version"
+            echo "release_tag=$release_tag"
+            echo "repo=$GITHUB_REPOSITORY"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.target }}
+    needs: metadata
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: codex-rs
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            target: aarch64-apple-darwin
+          - runner: macos-15
+            target: x86_64-apple-darwin
+          - runner: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            deb_arch: amd64
+          - runner: ubuntu-24.04-arm
+            target: aarch64-unknown-linux-gnu
+            deb_arch: arm64
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -y
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            libcap-dev \
+            pkg-config
+
+      - uses: dtolnay/rust-toolchain@a0b273b48ed29de4470960879e8381ff45632f26 # 1.93.0
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Build codex
+        shell: bash
+        run: cargo build --locked --target "${{ matrix.target }}" --release --bin codex
+
+      - name: Package tarball
+        shell: bash
+        run: |
+          set -euo pipefail
+          out_dir="$GITHUB_WORKSPACE/dist"
+          package_dir="$RUNNER_TEMP/codex-${{ matrix.target }}"
+          mkdir -p "$out_dir" "$package_dir"
+          cp "target/${{ matrix.target }}/release/codex" "$package_dir/codex"
+          chmod 0755 "$package_dir/codex"
+          tar -C "$package_dir" -czf "$out_dir/codex-${{ matrix.target }}.tar.gz" codex
+
+      - name: Package Debian archive
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          "$GITHUB_WORKSPACE/scripts/release/build-deb.sh" \
+            --binary "target/${{ matrix.target }}/release/codex" \
+            --version "${{ needs.metadata.outputs.version }}" \
+            --deb-version "${{ needs.metadata.outputs.deb_version }}" \
+            --arch "${{ matrix.deb_arch }}" \
+            --output "$GITHUB_WORKSPACE/dist/codex-${{ matrix.deb_arch }}.deb" \
+            --repo-url "https://github.com/${{ needs.metadata.outputs.repo }}"
+
+      - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        with:
+          name: release-${{ matrix.target }}
+          path: dist/*
+
+  release:
+    name: Publish GitHub release
+    needs:
+      - metadata
+      - build
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ needs.metadata.outputs.version }}
+      release_tag: ${{ needs.metadata.outputs.release_tag }}
+      repo: ${{ needs.metadata.outputs.repo }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          path: dist/artifacts
+
+      - name: Stage release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/release
+          find dist/artifacts -maxdepth 3 -type f -exec cp {} dist/release/ \;
+          cp scripts/install/install-deb.sh dist/release/install-deb.sh
+          chmod 0644 dist/release/*
+          (
+            cd dist/release
+            sha256sum codex-* install-deb.sh > SHA256SUMS
+          )
+          ls -lh dist/release
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
+        with:
+          name: ${{ needs.metadata.outputs.version }}
+          tag_name: ${{ needs.metadata.outputs.release_tag }}
+          generate_release_notes: true
+          files: dist/release/*
+
+  update-homebrew-tap:
+    name: Update Homebrew tap
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      TAP_REPOSITORY: ${{ vars.HOMEBREW_TAP_REPOSITORY || 'daulet/homebrew-tap' }}
+      TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+    steps:
+      - name: Check tap token
+        id: tap_token
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$TAP_GITHUB_TOKEN" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Homebrew tap update skipped::Set TAP_GITHUB_TOKEN to update $TAP_REPOSITORY automatically."
+          fi
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        if: steps.tap_token.outputs.available == 'true'
+        with:
+          path: codex
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        if: steps.tap_token.outputs.available == 'true'
+        with:
+          repository: ${{ env.TAP_REPOSITORY }}
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          path: homebrew-tap
+
+      - name: Download release checksums
+        if: steps.tap_token.outputs.available == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          gh release download "${{ needs.release.outputs.release_tag }}" \
+            --repo "${{ needs.release.outputs.repo }}" \
+            --pattern SHA256SUMS \
+            --dir dist
+
+      - name: Update Formula/codex.rb
+        if: steps.tap_token.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 codex/scripts/release/update-homebrew-formula.py \
+            --tap-root homebrew-tap \
+            --version "${{ needs.release.outputs.version }}" \
+            --release-tag "${{ needs.release.outputs.release_tag }}" \
+            --repo "${{ needs.release.outputs.repo }}" \
+            --sha256sums dist/SHA256SUMS
+
+      - name: Commit and push formula
+        if: steps.tap_token.outputs.available == 'true'
+        shell: bash
+        working-directory: homebrew-tap
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- Formula/codex.rb; then
+            echo "Formula/codex.rb is already up to date."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Formula/codex.rb
+          git commit -m "Update codex to ${{ needs.release.outputs.version }}"
+          git push

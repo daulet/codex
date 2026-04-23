@@ -1,5 +1,17 @@
 ## Installing & building
 
+### Fork releases
+
+This fork publishes macOS Homebrew and Debian/Ubuntu packages from GitHub Releases.
+
+```bash
+# macOS
+brew install daulet/tap/codex
+
+# Debian/Ubuntu
+curl -fsSL https://github.com/daulet/codex/releases/latest/download/install-deb.sh | sh
+```
+
 ### System requirements
 
 | Requirement                 | Details                                                         |
