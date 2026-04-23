@@ -7276,6 +7276,7 @@ impl ChatWidget {
                     });
                 }
             }
+            EventMsg::ThreadNavigated(_) => {}
             EventMsg::RawResponseItem(_)
             | EventMsg::ItemStarted(_)
             | EventMsg::AgentMessageContentDelta(_)

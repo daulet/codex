@@ -776,6 +776,12 @@ pub enum Op {
     /// responsible for undoing any edits on disk.
     ThreadRollback { num_turns: u32 },
 
+    /// Request Codex to switch the active conversation leaf to an existing turn.
+    ///
+    /// This does not attempt to revert local filesystem changes. Clients are
+    /// responsible for reconciling the workspace with the selected branch.
+    ThreadNavigate { target_turn_id: Option<String> },
+
     /// Request a code review from the agent.
     Review { review_request: ReviewRequest },
 
@@ -901,6 +907,7 @@ impl Op {
             Self::SetThreadMemoryMode { .. } => "set_thread_memory_mode",
             Self::Undo => "undo",
             Self::ThreadRollback { .. } => "thread_rollback",
+            Self::ThreadNavigate { .. } => "thread_navigate",
             Self::Review { .. } => "review",
             Self::ApproveGuardianDeniedAction { .. } => "approve_guardian_denied_action",
             Self::Shutdown => "shutdown",
@@ -1546,6 +1553,9 @@ pub enum EventMsg {
 
     /// Conversation history was rolled back by dropping the last N user turns.
     ThreadRolledBack(ThreadRolledBackEvent),
+
+    /// Conversation history switched to an existing turn in the persisted tree.
+    ThreadNavigated(ThreadNavigatedEvent),
 
     /// Agent has started a turn.
     /// v1 wire format uses `task_started`; accept `turn_started` for v2 interop.
@@ -3378,6 +3388,16 @@ pub struct UndoCompletedEvent {
 pub struct ThreadRolledBackEvent {
     /// Number of user turns that were removed from context.
     pub num_turns: u32,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]
+pub struct ThreadNavigatedEvent {
+    /// Active leaf before navigation, when known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_leaf_turn_id: Option<String>,
+    /// Active leaf after navigation. `None` means the root before the first user turn.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub target_turn_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema, TS)]

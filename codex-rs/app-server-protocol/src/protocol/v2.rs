@@ -3837,6 +3837,28 @@ pub struct ThreadRollbackResponse {
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export_to = "v2/")]
+pub struct ThreadNavigateParams {
+    pub thread_id: String,
+    /// Existing turn id to make active. Omit or pass null to navigate to the root.
+    #[ts(optional = nullable)]
+    pub target_turn_id: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadNavigateResponse {
+    /// The updated thread after navigation, with `turns` populated.
+    ///
+    /// The ThreadItems stored in each Turn are lossy since we explicitly do not
+    /// persist all agent interactions, such as command executions. This is the same
+    /// behavior as `thread/resume`.
+    pub thread: Thread,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
 pub struct ThreadListParams {
     /// Opaque pagination cursor returned by a previous call.
     #[ts(optional = nullable)]

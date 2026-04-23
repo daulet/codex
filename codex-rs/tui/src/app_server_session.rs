@@ -52,6 +52,8 @@ use codex_app_server_protocol::ThreadLoadedListResponse;
 use codex_app_server_protocol::ThreadMemoryMode;
 use codex_app_server_protocol::ThreadMemoryModeSetParams;
 use codex_app_server_protocol::ThreadMemoryModeSetResponse;
+use codex_app_server_protocol::ThreadNavigateParams;
+use codex_app_server_protocol::ThreadNavigateResponse;
 use codex_app_server_protocol::ThreadReadParams;
 use codex_app_server_protocol::ThreadReadResponse;
 use codex_app_server_protocol::ThreadRealtimeAppendAudioParams;
@@ -786,6 +788,24 @@ impl AppServerSession {
             })
             .await
             .wrap_err("thread/rollback failed in TUI")
+    }
+
+    pub(crate) async fn thread_navigate(
+        &mut self,
+        thread_id: ThreadId,
+        target_turn_id: Option<String>,
+    ) -> Result<ThreadNavigateResponse> {
+        let request_id = self.next_request_id();
+        self.client
+            .request_typed(ClientRequest::ThreadNavigate {
+                request_id,
+                params: ThreadNavigateParams {
+                    thread_id: thread_id.to_string(),
+                    target_turn_id,
+                },
+            })
+            .await
+            .wrap_err("thread/navigate failed in TUI")
     }
 
     pub(crate) async fn review_start(

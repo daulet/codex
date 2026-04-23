@@ -57,6 +57,7 @@ use codex_protocol::protocol::SkillErrorInfo;
 use codex_protocol::protocol::SkillsListEntry;
 use codex_protocol::protocol::ThreadMemoryMode;
 use codex_protocol::protocol::ThreadNameUpdatedEvent;
+use codex_protocol::protocol::ThreadNavigatedEvent;
 use codex_protocol::protocol::ThreadRolledBackEvent;
 use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::protocol::WarningEvent;
@@ -844,6 +845,129 @@ pub async fn thread_rollback(sess: &Arc<Session>, sub_id: String, num_turns: u32
     .await;
 }
 
+pub async fn thread_navigate(sess: &Arc<Session>, sub_id: String, target_turn_id: Option<String>) {
+    let has_active_turn = { sess.active_turn.lock().await.is_some() };
+    if has_active_turn {
+        sess.send_event_raw(Event {
+            id: sub_id,
+            msg: EventMsg::Error(ErrorEvent {
+                message: "Cannot navigate the thread tree while a turn is in progress.".to_string(),
+                codex_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
+            }),
+        })
+        .await;
+        return;
+    }
+
+    let turn_context = sess.new_default_turn_with_sub_id(sub_id).await;
+    let rollout_path = {
+        let recorder = {
+            let guard = sess.services.rollout.lock().await;
+            guard.clone()
+        };
+        let Some(recorder) = recorder else {
+            sess.send_event_raw(Event {
+                id: turn_context.sub_id.clone(),
+                msg: EventMsg::Error(ErrorEvent {
+                    message: "thread tree navigation requires a persisted rollout path".to_string(),
+                    codex_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
+                }),
+            })
+            .await;
+            return;
+        };
+        recorder.rollout_path().to_path_buf()
+    };
+    if let Some(recorder) = {
+        let guard = sess.services.rollout.lock().await;
+        guard.clone()
+    } && let Err(err) = recorder.flush().await
+    {
+        sess.send_event_raw(Event {
+            id: turn_context.sub_id.clone(),
+            msg: EventMsg::Error(ErrorEvent {
+                message: format!(
+                    "failed to flush rollout `{}` for tree navigation replay: {err}",
+                    rollout_path.display()
+                ),
+                codex_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
+            }),
+        })
+        .await;
+        return;
+    }
+
+    let initial_history = match RolloutRecorder::get_rollout_history(rollout_path.as_path()).await {
+        Ok(history) => history,
+        Err(err) => {
+            sess.send_event_raw(Event {
+                id: turn_context.sub_id.clone(),
+                msg: EventMsg::Error(ErrorEvent {
+                    message: format!(
+                        "failed to load rollout `{}` for tree navigation replay: {err}",
+                        rollout_path.display()
+                    ),
+                    codex_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
+                }),
+            })
+            .await;
+            return;
+        }
+    };
+
+    let rollout_items = initial_history.get_rollout_items();
+    if let Some(target_turn_id) = target_turn_id.as_deref()
+        && !codex_rollout::thread_tree_contains_turn_id(&rollout_items, target_turn_id)
+    {
+        sess.send_event_raw(Event {
+            id: turn_context.sub_id.clone(),
+            msg: EventMsg::Error(ErrorEvent {
+                message: format!("No thread tree turn found matching `{target_turn_id}`."),
+                codex_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
+            }),
+        })
+        .await;
+        return;
+    }
+
+    let previous_leaf_turn_id =
+        codex_rollout::build_thread_tree(&rollout_items).active_leaf_turn_id;
+    let navigated_event = ThreadNavigatedEvent {
+        previous_leaf_turn_id,
+        target_turn_id,
+    };
+    let navigated_msg = EventMsg::ThreadNavigated(navigated_event);
+    let replay_items = rollout_items
+        .into_iter()
+        .chain(std::iter::once(RolloutItem::EventMsg(
+            navigated_msg.clone(),
+        )))
+        .collect::<Vec<_>>();
+    sess.apply_rollout_reconstruction(turn_context.as_ref(), replay_items.as_slice())
+        .await;
+    sess.recompute_token_usage(turn_context.as_ref()).await;
+
+    sess.persist_rollout_items(&[RolloutItem::EventMsg(navigated_msg.clone())])
+        .await;
+    if let Err(err) = sess.flush_rollout().await {
+        sess.send_event(
+            turn_context.as_ref(),
+            EventMsg::Warning(WarningEvent {
+                message: format!(
+                    "Navigated the thread tree, but failed to save the navigation marker. Codex will continue retrying. Error: {err}"
+                ),
+            }),
+        )
+        .await;
+    }
+
+    sess.deliver_event_raw(Event {
+        id: turn_context.sub_id.clone(),
+        msg: navigated_msg,
+    })
+    .await;
+}
+
 async fn persist_thread_name_update(
     sess: &Arc<Session>,
     event: ThreadNameUpdatedEvent,
@@ -1228,6 +1352,10 @@ pub(super) async fn submission_loop(
                 }
                 Op::ThreadRollback { num_turns } => {
                     thread_rollback(&sess, sub.id.clone(), num_turns).await;
+                    false
+                }
+                Op::ThreadNavigate { target_turn_id } => {
+                    thread_navigate(&sess, sub.id.clone(), target_turn_id).await;
                     false
                 }
                 Op::SetThreadName { name } => {

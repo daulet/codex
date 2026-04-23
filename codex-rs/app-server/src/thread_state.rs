@@ -58,6 +58,7 @@ pub(crate) struct TurnSummary {
 pub(crate) struct ThreadState {
     pub(crate) pending_interrupts: PendingInterruptQueue,
     pub(crate) pending_rollbacks: Option<ConnectionRequestId>,
+    pub(crate) pending_thread_navigation: Option<ConnectionRequestId>,
     pub(crate) turn_summary: TurnSummary,
     pub(crate) cancel_tx: Option<oneshot::Sender<()>>,
     pub(crate) experimental_raw_events: bool,

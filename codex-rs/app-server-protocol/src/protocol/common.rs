@@ -324,6 +324,10 @@ client_request_definitions! {
         params: v2::ThreadRollbackParams,
         response: v2::ThreadRollbackResponse,
     },
+    ThreadNavigate => "thread/navigate" {
+        params: v2::ThreadNavigateParams,
+        response: v2::ThreadNavigateResponse,
+    },
     ThreadList => "thread/list" {
         params: v2::ThreadListParams,
         response: v2::ThreadListResponse,
