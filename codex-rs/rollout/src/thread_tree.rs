@@ -11,6 +11,7 @@ pub struct ThreadTree {
     pub turns: Vec<ThreadTreeTurn>,
     pub roots: Vec<usize>,
     pub active_leaf_turn_id: Option<String>,
+    pub side_branches: Vec<ThreadTreeSideBranch>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -25,6 +26,15 @@ pub struct ThreadTreeTurn {
     pub is_active_path: bool,
     pub rollout_start_index: usize,
     pub rollout_end_index: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadTreeSideBranch {
+    pub thread_id: String,
+    pub parent_turn_id: Option<String>,
+    pub title: Option<String>,
+    pub preview: Option<String>,
+    pub updated_at: Option<i64>,
 }
 
 #[derive(Debug)]
@@ -206,6 +216,7 @@ pub fn build_thread_tree(items: &[RolloutItem]) -> ThreadTree {
         turns,
         roots,
         active_leaf_turn_id: current_leaf_turn_id,
+        side_branches: Vec::new(),
     }
 }
 

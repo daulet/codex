@@ -43,6 +43,7 @@ use codex_app_server_protocol::ThreadCompactStartParams;
 use codex_app_server_protocol::ThreadCompactStartResponse;
 use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
+use codex_app_server_protocol::ThreadForkSideConversationParams;
 use codex_app_server_protocol::ThreadInjectItemsParams;
 use codex_app_server_protocol::ThreadInjectItemsResponse;
 use codex_app_server_protocol::ThreadListParams;
@@ -396,17 +397,44 @@ impl AppServerSession {
         thread_id: ThreadId,
     ) -> Result<AppServerStartedThread> {
         let request_id = self.next_request_id();
+        let params = thread_fork_params_from_config(
+            config.clone(),
+            thread_id,
+            self.thread_params_mode(),
+            self.remote_cwd_override.as_deref(),
+        );
         let response: ThreadForkResponse = self
             .client
-            .request_typed(ClientRequest::ThreadFork {
-                request_id,
-                params: thread_fork_params_from_config(
-                    config.clone(),
-                    thread_id,
-                    self.thread_params_mode(),
-                    self.remote_cwd_override.as_deref(),
-                ),
-            })
+            .request_typed(ClientRequest::ThreadFork { request_id, params })
+            .await
+            .wrap_err("thread/fork failed during TUI bootstrap")?;
+        let fork_parent_title = self
+            .fork_parent_title_from_app_server(response.thread.forked_from_id.as_deref())
+            .await;
+        let mut started = started_thread_from_fork_response(response, &config).await?;
+        started.session.fork_parent_title = fork_parent_title;
+        Ok(started)
+    }
+
+    pub(crate) async fn fork_side_thread(
+        &mut self,
+        config: Config,
+        thread_id: ThreadId,
+    ) -> Result<AppServerStartedThread> {
+        let request_id = self.next_request_id();
+        let mut params = thread_fork_params_from_config(
+            config.clone(),
+            thread_id,
+            self.thread_params_mode(),
+            self.remote_cwd_override.as_deref(),
+        );
+        params.ephemeral = false;
+        params.side_conversation = Some(ThreadForkSideConversationParams {
+            parent_turn_id: None,
+        });
+        let response: ThreadForkResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadFork { request_id, params })
             .await
             .wrap_err("thread/fork failed during TUI bootstrap")?;
         let fork_parent_title = self
@@ -1582,6 +1610,7 @@ mod tests {
             thread: codex_app_server_protocol::Thread {
                 id: thread_id.to_string(),
                 forked_from_id: Some(forked_from_id.to_string()),
+                side_conversation: None,
                 preview: "hello".to_string(),
                 ephemeral: false,
                 model_provider: "openai".to_string(),

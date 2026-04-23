@@ -12079,6 +12079,17 @@
           "description": "Usually the first user message in the thread, if available.",
           "type": "string"
         },
+        "sideConversation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadSideConversation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Parent metadata when this thread is a persisted `/side` discussion."
+        },
         "source": {
           "allOf": [
             {
@@ -12318,6 +12329,17 @@
             }
           ]
         },
+        "sideConversation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadForkSideConversationParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Marks this fork as a persisted side conversation attached to the source thread. When `parentTurnId` is omitted, the server attaches the side thread to the source thread's current tree leaf."
+        },
         "threadId": {
           "type": "string"
         }
@@ -12413,6 +12435,17 @@
         "thread"
       ],
       "title": "ThreadForkResponse",
+      "type": "object"
+    },
+    "ThreadForkSideConversationParams": {
+      "properties": {
+        "parentTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "ThreadId": {
@@ -13973,6 +14006,23 @@
     "ThreadShellCommandResponse": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "ThreadShellCommandResponse",
+      "type": "object"
+    },
+    "ThreadSideConversation": {
+      "properties": {
+        "parentThreadId": {
+          "type": "string"
+        },
+        "parentTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "parentThreadId"
+      ],
       "type": "object"
     },
     "ThreadSortKey": {

@@ -61,6 +61,7 @@ use codex_protocol::protocol::RolloutLine;
 use codex_protocol::protocol::SessionMeta;
 use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SideConversationMeta;
 use codex_state::StateRuntime;
 use codex_state::ThreadMetadataBuilder;
 use codex_utils_path as path_utils;
@@ -88,6 +89,7 @@ pub enum RolloutRecorderParams {
     Create {
         conversation_id: ThreadId,
         forked_from_id: Option<ThreadId>,
+        side_conversation: Option<SideConversationMeta>,
         source: SessionSource,
         base_instructions: BaseInstructions,
         dynamic_tools: Vec<DynamicToolSpec>,
@@ -169,9 +171,30 @@ impl RolloutRecorderParams {
         dynamic_tools: Vec<DynamicToolSpec>,
         event_persistence_mode: EventPersistenceMode,
     ) -> Self {
+        Self::new_with_side_conversation(
+            conversation_id,
+            forked_from_id,
+            /*side_conversation*/ None,
+            source,
+            base_instructions,
+            dynamic_tools,
+            event_persistence_mode,
+        )
+    }
+
+    pub fn new_with_side_conversation(
+        conversation_id: ThreadId,
+        forked_from_id: Option<ThreadId>,
+        side_conversation: Option<SideConversationMeta>,
+        source: SessionSource,
+        base_instructions: BaseInstructions,
+        dynamic_tools: Vec<DynamicToolSpec>,
+        event_persistence_mode: EventPersistenceMode,
+    ) -> Self {
         Self::Create {
             conversation_id,
             forked_from_id,
+            side_conversation,
             source,
             base_instructions,
             dynamic_tools,
@@ -643,6 +666,7 @@ impl RolloutRecorder {
                 RolloutRecorderParams::Create {
                     conversation_id,
                     forked_from_id,
+                    side_conversation,
                     source,
                     base_instructions,
                     dynamic_tools,
@@ -664,6 +688,7 @@ impl RolloutRecorder {
                     let session_meta = SessionMeta {
                         id: session_id,
                         forked_from_id,
+                        side_conversation,
                         timestamp,
                         cwd: config.cwd().to_path_buf(),
                         originator: originator().value,
@@ -1010,6 +1035,8 @@ fn fill_missing_thread_item_metadata(item: &mut ThreadItem, state_item: ThreadIt
     let ThreadItem {
         path: _state_path,
         thread_id: _state_thread_id,
+        forked_from_id,
+        side_conversation,
         first_user_message,
         cwd,
         git_branch,
@@ -1026,6 +1053,12 @@ fn fill_missing_thread_item_metadata(item: &mut ThreadItem, state_item: ThreadIt
 
     if item.first_user_message.is_none() {
         item.first_user_message = first_user_message;
+    }
+    if item.forked_from_id.is_none() {
+        item.forked_from_id = forked_from_id;
+    }
+    if item.side_conversation.is_none() {
+        item.side_conversation = side_conversation;
     }
     if item.cwd.is_none() {
         item.cwd = cwd;
@@ -1783,6 +1816,13 @@ fn thread_item_from_state_metadata(item: codex_state::ThreadMetadata) -> ThreadI
     ThreadItem {
         path: item.rollout_path,
         thread_id: Some(item.id),
+        forked_from_id: None,
+        side_conversation: item.side_parent_thread_id.map(|parent_thread_id| {
+            codex_protocol::protocol::SideConversationMeta {
+                parent_thread_id,
+                parent_turn_id: item.side_parent_turn_id,
+            }
+        }),
         first_user_message: item.first_user_message,
         cwd: Some(item.cwd),
         git_branch: item.git_branch,

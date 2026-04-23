@@ -1,18 +1,19 @@
-//! Transient side-conversation threads.
+//! Persisted side-conversation threads.
 //!
-//! A side conversation is an ephemeral fork used for a quick /side question while keeping the
+//! A side conversation is a persisted fork used for a quick /side question while keeping the
 //! primary thread focused. This module owns the app-level lifecycle for those forks: switching into
-//! them, returning to their parent, and discarding them when normal thread navigation moves
-//! elsewhere. The fork receives hidden developer instructions that make inherited history reference
-//! material only and steer the agent away from mutations unless the side conversation explicitly asks
-//! for them.
+//! them, returning to their parent, and leaving the live side view when normal thread navigation
+//! moves elsewhere. The fork receives hidden developer instructions that make inherited history
+//! reference material only and steer the agent away from mutations unless the side conversation
+//! explicitly asks for them.
 
 use super::*;
 use crate::chatwidget::InterruptedTurnNoticeMode;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 
-const SIDE_RENAME_BLOCK_MESSAGE: &str = "Side conversations are ephemeral and cannot be renamed.";
+const SIDE_RENAME_BLOCK_MESSAGE: &str =
+    "Side conversations cannot be renamed while open from /side.";
 const SIDE_MAIN_THREAD_UNAVAILABLE_MESSAGE: &str =
     "'/side' is unavailable until the main thread is ready.";
 const SIDE_NO_STARTED_CONVERSATION_MESSAGE: &str = concat!(
@@ -345,11 +346,6 @@ impl App {
         app_server: &mut AppServerSession,
         thread_id: ThreadId,
     ) -> bool {
-        if let Err(message) = self.interrupt_side_thread(app_server, thread_id).await {
-            tracing::warn!("{message}");
-            self.chat_widget.add_error_message(message);
-            return false;
-        }
         if let Err(err) = app_server.thread_unsubscribe(thread_id).await {
             let message =
                 format!("Failed to close side conversation {thread_id}; it is still open: {err}");
@@ -376,22 +372,6 @@ impl App {
             self.refresh_pending_thread_approvals().await;
         }
         self.sync_active_agent_label();
-    }
-
-    async fn interrupt_side_thread(
-        &self,
-        app_server: &mut AppServerSession,
-        thread_id: ThreadId,
-    ) -> std::result::Result<(), String> {
-        let interrupt_result =
-            if let Some(turn_id) = self.active_turn_id_for_thread(thread_id).await {
-                app_server.turn_interrupt(thread_id, turn_id).await
-            } else {
-                app_server.startup_interrupt(thread_id).await
-            };
-        interrupt_result.map_err(|err| {
-            format!("Failed to close side conversation {thread_id}; it is still open: {err}")
-        })
     }
 
     async fn keep_side_thread_visible_after_cleanup_failure(
@@ -447,7 +427,7 @@ impl App {
 
     pub(super) fn side_fork_config(&self) -> Config {
         let mut fork_config = self.config.clone();
-        fork_config.ephemeral = true;
+        fork_config.ephemeral = false;
         fork_config.developer_instructions = Some(Self::side_developer_instructions(
             fork_config.developer_instructions.as_deref(),
         ));
@@ -547,7 +527,10 @@ impl App {
             .await;
 
         let fork_config = self.side_fork_config();
-        match app_server.fork_thread(fork_config, parent_thread_id).await {
+        match app_server
+            .fork_side_thread(fork_config, parent_thread_id)
+            .await
+        {
             Ok(forked) => {
                 let child_thread_id = forked.session.thread_id;
                 let channel = self.ensure_thread_channel(child_thread_id);

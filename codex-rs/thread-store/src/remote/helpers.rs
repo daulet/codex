@@ -123,6 +123,7 @@ pub(super) fn stored_thread_from_proto(
         thread_id,
         rollout_path: None,
         forked_from_id,
+        side_conversation: None,
         preview: thread.preview,
         name: thread.name,
         model_provider: thread.model_provider,

@@ -7,6 +7,7 @@ import type { ApprovalsReviewer } from "./ApprovalsReviewer";
 import type { AskForApproval } from "./AskForApproval";
 import type { PermissionProfile } from "./PermissionProfile";
 import type { SandboxMode } from "./SandboxMode";
+import type { ThreadForkSideConversationParams } from "./ThreadForkSideConversationParams";
 
 /**
  * There are two ways to fork a thread:
@@ -17,23 +18,34 @@ import type { SandboxMode } from "./SandboxMode";
  *
  * Prefer using thread_id whenever possible.
  */
-export type ThreadForkParams = {threadId: string, /**
+export type ThreadForkParams = { threadId: string,
+/**
  * [UNSTABLE] Specify the rollout path to fork from.
  * If specified, the thread_id param will be ignored.
  */
-path?: string | null, /**
+path?: string | null,
+/**
  * Configuration overrides for the forked thread, if any.
  */
-model?: string | null, modelProvider?: string | null, serviceTier?: ServiceTier | null | null, cwd?: string | null, approvalPolicy?: AskForApproval | null, /**
+model?: string | null, modelProvider?: string | null, serviceTier?: ServiceTier | null | null, cwd?: string | null, approvalPolicy?: AskForApproval | null,
+/**
  * Override where approval requests are routed for review on this thread
  * and subsequent turns.
  */
-approvalsReviewer?: ApprovalsReviewer | null, sandbox?: SandboxMode | null, /**
+approvalsReviewer?: ApprovalsReviewer | null, sandbox?: SandboxMode | null,
+/**
  * Full permissions override for the forked thread. Cannot be combined
  * with `sandbox`.
  */
-permissionProfile?: PermissionProfile | null, config?: { [key in string]?: JsonValue } | null, baseInstructions?: string | null, developerInstructions?: string | null, ephemeral?: boolean, /**
+permissionProfile?: PermissionProfile | null, config?: { [key in string]?: JsonValue } | null, baseInstructions?: string | null, developerInstructions?: string | null, ephemeral?: boolean,
+/**
+ * Marks this fork as a persisted side conversation attached to the source
+ * thread. When `parentTurnId` is omitted, the server attaches the side
+ * thread to the source thread's current tree leaf.
+ */
+sideConversation?: ThreadForkSideConversationParams | null,
+/**
  * If true, persist additional rollout EventMsg variants required to
  * reconstruct a richer thread history on subsequent resume/fork/read.
  */
-persistExtendedHistory: boolean};
+persistExtendedHistory: boolean, };

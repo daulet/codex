@@ -143,10 +143,10 @@ async fn read_thread_from_rollout_path(
             .ok_or_else(|| ThreadStoreError::Internal {
                 message: format!("failed to read thread id from {}", path.display()),
             })?;
-    thread.forked_from_id = read_session_meta_line(path.as_path())
-        .await
-        .ok()
-        .and_then(|meta_line| meta_line.meta.forked_from_id);
+    if let Ok(meta_line) = read_session_meta_line(path.as_path()).await {
+        thread.forked_from_id = meta_line.meta.forked_from_id;
+        thread.side_conversation = meta_line.meta.side_conversation;
+    }
     if let Ok(Some(title)) =
         find_thread_name_by_id(store.config.codex_home.as_path(), &thread.thread_id).await
     {
@@ -190,14 +190,23 @@ async fn stored_thread_from_sqlite_metadata(
             .ok()
             .flatten(),
     };
-    let forked_from_id = read_session_meta_line(metadata.rollout_path.as_path())
+    let session_meta = read_session_meta_line(metadata.rollout_path.as_path())
         .await
         .ok()
-        .and_then(|meta_line| meta_line.meta.forked_from_id);
+        .map(|meta_line| meta_line.meta);
+    let forked_from_id = session_meta.as_ref().and_then(|meta| meta.forked_from_id);
+    let side_conversation_from_rollout = session_meta.and_then(|meta| meta.side_conversation);
+    let side_conversation_from_metadata = metadata.side_parent_thread_id.map(|parent_thread_id| {
+        codex_protocol::protocol::SideConversationMeta {
+            parent_thread_id,
+            parent_turn_id: metadata.side_parent_turn_id.clone(),
+        }
+    });
     StoredThread {
         thread_id: metadata.id,
         rollout_path: Some(metadata.rollout_path),
         forked_from_id,
+        side_conversation: side_conversation_from_metadata.or(side_conversation_from_rollout),
         preview: metadata.first_user_message.clone().unwrap_or_default(),
         name,
         model_provider: if metadata.model_provider.is_empty() {
@@ -268,6 +277,7 @@ fn stored_thread_from_meta_line(
         thread_id: meta_line.meta.id,
         rollout_path: Some(path),
         forked_from_id: meta_line.meta.forked_from_id,
+        side_conversation: meta_line.meta.side_conversation,
         preview: String::new(),
         name: None,
         model_provider: meta_line

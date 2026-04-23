@@ -185,6 +185,7 @@ use codex_app_server_protocol::ThreadSetNameParams;
 use codex_app_server_protocol::ThreadSetNameResponse;
 use codex_app_server_protocol::ThreadShellCommandParams;
 use codex_app_server_protocol::ThreadShellCommandResponse;
+use codex_app_server_protocol::ThreadSideConversation;
 use codex_app_server_protocol::ThreadSortKey;
 use codex_app_server_protocol::ThreadSourceKind;
 use codex_app_server_protocol::ThreadStartParams;
@@ -310,6 +311,7 @@ use codex_protocol::dynamic_tools::DynamicToolSpec as CoreDynamicToolSpec;
 use codex_protocol::error::CodexErr;
 use codex_protocol::error::Result as CodexResult;
 use codex_protocol::items::TurnItem;
+use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::permissions::FileSystemAccessMode;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
@@ -332,12 +334,14 @@ use codex_protocol::protocol::ReviewTarget as CoreReviewTarget;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::SessionConfiguredEvent;
 use codex_protocol::protocol::SessionMetaLine;
+use codex_protocol::protocol::SideConversationMeta;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use codex_protocol::protocol::USER_MESSAGE_BEGIN;
 use codex_protocol::protocol::W3cTraceContext;
 use codex_protocol::user_input::MAX_USER_INPUT_TEXT_CHARS;
 use codex_protocol::user_input::UserInput as CoreInputItem;
 use codex_rmcp_client::perform_oauth_login_return_url;
+use codex_rollout::build_thread_tree;
 use codex_rollout::state_db::StateDbHandle;
 use codex_rollout::state_db::get_state_db;
 use codex_rollout::state_db::reconcile_rollout;
@@ -3973,25 +3977,29 @@ impl CodexMessageProcessor {
                 },
             )
             .await;
-        let (summaries, next_cursor) = match list_result {
+        let (stored_threads, next_cursor) = match list_result {
             Ok(r) => r,
             Err(error) => {
                 self.outgoing.send_error(request_id, error).await;
                 return;
             }
         };
-        let backwards_cursor = summaries.first().and_then(|summary| {
-            thread_backwards_cursor_for_sort_key(summary, store_sort_key, sort_direction)
+        let backwards_cursor = stored_threads.first().and_then(|thread| {
+            thread_backwards_cursor_for_stored_thread(thread, store_sort_key, sort_direction)
         });
-        let mut threads = Vec::with_capacity(summaries.len());
-        let mut thread_ids = HashSet::with_capacity(summaries.len());
-        let mut status_ids = Vec::with_capacity(summaries.len());
+        let mut threads = Vec::with_capacity(stored_threads.len());
+        let mut thread_ids = HashSet::with_capacity(stored_threads.len());
+        let mut status_ids = Vec::with_capacity(stored_threads.len());
 
-        for summary in summaries {
-            let conversation_id = summary.conversation_id;
+        for stored_thread in stored_threads {
+            let conversation_id = stored_thread.thread_id;
             thread_ids.insert(conversation_id);
 
-            let thread = summary_to_thread(summary, &self.config.cwd);
+            let (thread, _) = thread_from_stored_thread(
+                stored_thread,
+                self.config.model_provider_id.as_str(),
+                &self.config.cwd,
+            );
             status_ids.push(thread.id.clone());
             threads.push((conversation_id, thread));
         }
@@ -4177,7 +4185,8 @@ impl CodexMessageProcessor {
                 let (mut thread, history) =
                     thread_from_stored_thread(stored_thread, fallback_provider, &self.config.cwd);
                 if include_turns && let Some(history) = history {
-                    thread.turns = build_turns_from_rollout_items(&history.items);
+                    let items = visible_rollout_items_for_thread(&thread, &history.items);
+                    thread.turns = build_turns_from_rollout_items(&items);
                 }
                 Ok(Some(thread))
             }
@@ -4243,6 +4252,7 @@ impl CodexMessageProcessor {
         if include_turns && let Some(rollout_path) = rollout_path {
             match read_rollout_items_from_rollout(rollout_path).await {
                 Ok(items) => {
+                    let items = visible_rollout_items_for_thread(thread, &items);
                     thread.turns = build_turns_from_rollout_items(&items);
                 }
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -5061,12 +5071,21 @@ impl CodexMessageProcessor {
             base_instructions,
             developer_instructions,
             ephemeral,
+            side_conversation,
             persist_extended_history,
         } = params;
         if sandbox.is_some() && permission_profile.is_some() {
             self.send_invalid_request_error(
                 request_id,
                 "`permissionProfile` cannot be combined with `sandbox`".to_string(),
+            )
+            .await;
+            return;
+        }
+        if ephemeral && side_conversation.is_some() {
+            self.send_invalid_request_error(
+                request_id,
+                "`sideConversation` forks must be persisted; set `ephemeral` to false".to_string(),
             )
             .await;
             return;
@@ -5111,6 +5130,23 @@ impl CodexMessageProcessor {
                     return;
                 }
             }
+        };
+
+        let side_conversation = match side_conversation {
+            Some(side_conversation) => match side_conversation_meta_for_fork(
+                source_thread_id,
+                rollout_path.as_path(),
+                side_conversation.parent_turn_id,
+            )
+            .await
+            {
+                Ok(side_conversation) => Some(side_conversation),
+                Err(message) => {
+                    self.send_invalid_request_error(request_id, message).await;
+                    return;
+                }
+            },
+            None => None,
         };
 
         let history_cwd =
@@ -5178,11 +5214,12 @@ impl CodexMessageProcessor {
             ..
         } = match self
             .thread_manager
-            .fork_thread(
+            .fork_thread_with_side_conversation(
                 ForkSnapshot::Interrupted,
                 config,
                 rollout_path.clone(),
                 persist_extended_history,
+                side_conversation.clone(),
                 self.request_trace_context(&request_id).await,
             )
             .await
@@ -5294,6 +5331,7 @@ impl CodexMessageProcessor {
             }
             thread
         };
+        thread.side_conversation = side_conversation.map(thread_side_conversation_to_api);
 
         if let Some(fork_rollout_path) = session_configured.rollout_path.as_ref()
             && let Err(message) = populate_thread_turns(
@@ -5450,7 +5488,7 @@ impl CodexMessageProcessor {
         sort_key: StoreThreadSortKey,
         sort_direction: SortDirection,
         filters: ThreadListFilters,
-    ) -> Result<(Vec<ConversationSummary>, Option<String>), JSONRPCErrorError> {
+    ) -> Result<(Vec<StoredThread>, Option<String>), JSONRPCErrorError> {
         let ThreadListFilters {
             model_providers,
             source_kinds,
@@ -5475,7 +5513,6 @@ impl CodexMessageProcessor {
             }
             None => Some(vec![self.config.model_provider_id.clone()]),
         };
-        let fallback_provider = self.config.model_provider_id.clone();
         let (allowed_sources_vec, source_kind_filter) = compute_source_filters(source_kinds);
         let allowed_sources = allowed_sources_vec.as_slice();
         let store_sort_direction = match sort_direction {
@@ -5503,21 +5540,25 @@ impl CodexMessageProcessor {
                 .map_err(thread_store_list_error)?;
 
             let mut filtered = Vec::with_capacity(page.items.len());
-            for it in page.items {
-                let Some(summary) = summary_from_stored_thread(it, fallback_provider.as_str())
-                else {
+            for thread in page.items {
+                if thread.rollout_path.is_none() {
                     continue;
-                };
+                }
+                let source = with_thread_spawn_agent_metadata(
+                    thread.source.clone(),
+                    thread.agent_nickname.clone(),
+                    thread.agent_role.clone(),
+                );
                 if source_kind_filter
                     .as_ref()
-                    .is_none_or(|filter| source_kind_matches(&summary.source, filter))
+                    .is_none_or(|filter| source_kind_matches(&source, filter))
                     && cwd_filters.as_ref().is_none_or(|expected_cwds| {
                         expected_cwds.iter().any(|expected_cwd| {
-                            path_utils::paths_match_after_normalization(&summary.cwd, expected_cwd)
+                            path_utils::paths_match_after_normalization(&thread.cwd, expected_cwd)
                         })
                     })
                 {
-                    filtered.push(summary);
+                    filtered.push(thread);
                     if filtered.len() >= remaining {
                         break;
                     }
@@ -8826,7 +8867,10 @@ async fn populate_thread_turns(
         ThreadTurnSource::RolloutPath(rollout_path) => {
             read_rollout_items_from_rollout(rollout_path)
                 .await
-                .map(|items| build_turns_from_rollout_items(&items))
+                .map(|items| {
+                    let items = visible_rollout_items_for_thread(thread, &items);
+                    build_turns_from_rollout_items(&items)
+                })
                 .map_err(|err| {
                     format!(
                         "failed to load rollout `{}` for thread {}: {err}",
@@ -8835,7 +8879,10 @@ async fn populate_thread_turns(
                     )
                 })?
         }
-        ThreadTurnSource::HistoryItems(items) => build_turns_from_rollout_items(items),
+        ThreadTurnSource::HistoryItems(items) => {
+            let items = visible_rollout_items_for_thread(thread, items);
+            build_turns_from_rollout_items(&items)
+        }
     };
     if let Some(active_turn) = active_turn {
         merge_turn_history_with_active_turn(&mut turns, active_turn.clone());
@@ -9414,6 +9461,50 @@ fn conversation_summary_not_found_error(conversation_id: ThreadId) -> JSONRPCErr
     }
 }
 
+async fn side_conversation_meta_for_fork(
+    source_thread_id: Option<ThreadId>,
+    rollout_path: &Path,
+    requested_parent_turn_id: Option<String>,
+) -> Result<SideConversationMeta, String> {
+    let parent_thread_id = match source_thread_id {
+        Some(thread_id) => thread_id,
+        None => {
+            read_session_meta_line(rollout_path)
+                .await
+                .map_err(|err| {
+                    format!(
+                        "failed to read side conversation parent metadata from {}: {err}",
+                        rollout_path.display()
+                    )
+                })?
+                .meta
+                .id
+        }
+    };
+    let parent_turn_id = match requested_parent_turn_id.and_then(non_empty_string) {
+        Some(parent_turn_id) => Some(parent_turn_id),
+        None => {
+            let (items, _, _) = RolloutRecorder::load_rollout_items(rollout_path)
+                .await
+                .map_err(|err| {
+                    format!(
+                        "failed to load side conversation parent tree from {}: {err}",
+                        rollout_path.display()
+                    )
+                })?;
+            build_thread_tree(&items).active_leaf_turn_id
+        }
+    };
+    Ok(SideConversationMeta {
+        parent_thread_id,
+        parent_turn_id,
+    })
+}
+
+fn non_empty_string(value: String) -> Option<String> {
+    (!value.trim().is_empty()).then_some(value)
+}
+
 fn conversation_summary_rollout_path_read_error(
     path: &Path,
     err: ThreadStoreError,
@@ -9480,9 +9571,13 @@ fn thread_from_stored_thread(
         thread.agent_role.clone(),
     );
     let history = thread.history;
+    let side_conversation = thread
+        .side_conversation
+        .map(thread_side_conversation_to_api);
     let thread = Thread {
         id: thread.thread_id.to_string(),
         forked_from_id: thread.forked_from_id.map(|id| id.to_string()),
+        side_conversation,
         preview: thread.first_user_message.unwrap_or(thread.preview),
         ephemeral: false,
         model_provider: if thread.model_provider.is_empty() {
@@ -9504,6 +9599,58 @@ fn thread_from_stored_thread(
         turns: Vec::new(),
     };
     (thread, history)
+}
+
+fn thread_side_conversation_to_api(
+    side_conversation: codex_protocol::protocol::SideConversationMeta,
+) -> ThreadSideConversation {
+    ThreadSideConversation {
+        parent_thread_id: side_conversation.parent_thread_id.to_string(),
+        parent_turn_id: side_conversation.parent_turn_id,
+    }
+}
+
+fn visible_rollout_items_for_thread(thread: &Thread, items: &[RolloutItem]) -> Vec<RolloutItem> {
+    let Some(side_conversation) = thread.side_conversation.as_ref() else {
+        return items.to_vec();
+    };
+
+    let mut start_index = side_conversation
+        .parent_turn_id
+        .as_deref()
+        .and_then(|parent_turn_id| {
+            build_thread_tree(items)
+                .turns
+                .into_iter()
+                .find(|turn| turn.turn_id == parent_turn_id)
+                .map(|turn| turn.rollout_end_index)
+        })
+        .unwrap_or(0)
+        .min(items.len());
+
+    if let Some(boundary_offset) = items[start_index..]
+        .iter()
+        .position(is_side_boundary_prompt_rollout_item)
+    {
+        start_index += boundary_offset + 1;
+    }
+
+    items[start_index..].to_vec()
+}
+
+fn is_side_boundary_prompt_rollout_item(item: &RolloutItem) -> bool {
+    let RolloutItem::ResponseItem(ResponseItem::Message { role, content, .. }) = item else {
+        return false;
+    };
+    if role != "user" {
+        return false;
+    }
+    content.iter().any(|item| match item {
+        ContentItem::InputText { text } => {
+            text.trim_start().starts_with("Side conversation boundary.")
+        }
+        _ => false,
+    })
 }
 
 fn thread_store_archive_error(operation: &str, err: ThreadStoreError) -> JSONRPCErrorError {
@@ -9970,6 +10117,7 @@ fn build_thread_from_snapshot(
     Thread {
         id: thread_id.to_string(),
         forked_from_id: None,
+        side_conversation: None,
         preview: String::new(),
         ephemeral: config_snapshot.ephemeral,
         model_provider: config_snapshot.model_provider_id.clone(),
@@ -10025,6 +10173,7 @@ pub(crate) fn summary_to_thread(
     Thread {
         id: conversation_id.to_string(),
         forked_from_id: None,
+        side_conversation: None,
         preview,
         ephemeral: false,
         model_provider,
@@ -10043,21 +10192,15 @@ pub(crate) fn summary_to_thread(
     }
 }
 
-fn thread_backwards_cursor_for_sort_key(
-    summary: &ConversationSummary,
+fn thread_backwards_cursor_for_stored_thread(
+    thread: &StoredThread,
     sort_key: StoreThreadSortKey,
     sort_direction: SortDirection,
 ) -> Option<String> {
     let timestamp = match sort_key {
-        StoreThreadSortKey::CreatedAt => summary.timestamp.as_deref(),
-        StoreThreadSortKey::UpdatedAt => summary
-            .updated_at
-            .as_deref()
-            .or(summary.timestamp.as_deref()),
+        StoreThreadSortKey::CreatedAt => thread.created_at,
+        StoreThreadSortKey::UpdatedAt => thread.updated_at,
     };
-    let timestamp = parse_datetime(timestamp)?;
-    // The state DB stores unique millisecond timestamps. Offset the reverse cursor by one
-    // millisecond so the opposite-direction query includes the page anchor.
     let timestamp = match sort_direction {
         SortDirection::Asc => timestamp.checked_add_signed(ChronoDuration::milliseconds(1))?,
         SortDirection::Desc => timestamp.checked_sub_signed(ChronoDuration::milliseconds(1))?,
@@ -10396,6 +10539,7 @@ mod tests {
             thread_id,
             rollout_path: Some(PathBuf::from("/tmp/thread.jsonl")),
             forked_from_id: None,
+            side_conversation: None,
             preview: "preview".to_string(),
             name: None,
             model_provider: "openai".to_string(),

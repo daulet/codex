@@ -41,6 +41,7 @@ use codex_protocol::protocol::Op;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::SessionConfiguredEvent;
 use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SideConversationMeta;
 use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::protocol::TurnAbortedEvent;
 use codex_protocol::protocol::W3cTraceContext;
@@ -521,6 +522,7 @@ impl ThreadManager {
             self.agent_control(),
             dynamic_tools,
             persist_extended_history,
+            /*side_conversation*/ None,
             metrics_service_name,
             parent_trace,
             /*user_shell_override*/ None,
@@ -561,6 +563,7 @@ impl ThreadManager {
             self.agent_control(),
             Vec::new(),
             persist_extended_history,
+            /*side_conversation*/ None,
             /*metrics_service_name*/ None,
             parent_trace,
             /*user_shell_override*/ None,
@@ -580,6 +583,7 @@ impl ThreadManager {
             self.agent_control(),
             Vec::new(),
             /*persist_extended_history*/ false,
+            /*side_conversation*/ None,
             /*metrics_service_name*/ None,
             /*parent_trace*/ None,
             /*user_shell_override*/ Some(user_shell_override),
@@ -602,6 +606,7 @@ impl ThreadManager {
             self.agent_control(),
             Vec::new(),
             /*persist_extended_history*/ false,
+            /*side_conversation*/ None,
             /*metrics_service_name*/ None,
             /*parent_trace*/ None,
             /*user_shell_override*/ Some(user_shell_override),
@@ -682,6 +687,29 @@ impl ThreadManager {
     where
         S: Into<ForkSnapshot>,
     {
+        self.fork_thread_with_side_conversation(
+            snapshot,
+            config,
+            path,
+            persist_extended_history,
+            /*side_conversation*/ None,
+            parent_trace,
+        )
+        .await
+    }
+
+    pub async fn fork_thread_with_side_conversation<S>(
+        &self,
+        snapshot: S,
+        config: Config,
+        path: PathBuf,
+        persist_extended_history: bool,
+        side_conversation: Option<SideConversationMeta>,
+        parent_trace: Option<W3cTraceContext>,
+    ) -> CodexResult<NewThread>
+    where
+        S: Into<ForkSnapshot>,
+    {
         let snapshot = snapshot.into();
         let history = RolloutRecorder::get_rollout_history(&path).await?;
         let snapshot_state = snapshot_turn_state(&history);
@@ -710,6 +738,7 @@ impl ThreadManager {
             self.agent_control(),
             Vec::new(),
             persist_extended_history,
+            side_conversation,
             /*metrics_service_name*/ None,
             parent_trace,
             /*user_shell_override*/ None,
@@ -809,6 +838,7 @@ impl ThreadManagerState {
             session_source,
             Vec::new(),
             persist_extended_history,
+            /*side_conversation*/ None,
             metrics_service_name,
             inherited_shell_snapshot,
             inherited_exec_policy,
@@ -836,6 +866,7 @@ impl ThreadManagerState {
             session_source,
             Vec::new(),
             /*persist_extended_history*/ false,
+            /*side_conversation*/ None,
             /*metrics_service_name*/ None,
             inherited_shell_snapshot,
             inherited_exec_policy,
@@ -864,6 +895,7 @@ impl ThreadManagerState {
             session_source,
             Vec::new(),
             persist_extended_history,
+            /*side_conversation*/ None,
             /*metrics_service_name*/ None,
             inherited_shell_snapshot,
             inherited_exec_policy,
@@ -883,6 +915,7 @@ impl ThreadManagerState {
         agent_control: AgentControl,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
+        side_conversation: Option<SideConversationMeta>,
         metrics_service_name: Option<String>,
         parent_trace: Option<W3cTraceContext>,
         user_shell_override: Option<crate::shell::Shell>,
@@ -895,6 +928,7 @@ impl ThreadManagerState {
             self.session_source.clone(),
             dynamic_tools,
             persist_extended_history,
+            side_conversation,
             metrics_service_name,
             /*inherited_shell_snapshot*/ None,
             /*inherited_exec_policy*/ None,
@@ -914,6 +948,7 @@ impl ThreadManagerState {
         session_source: SessionSource,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
+        side_conversation: Option<SideConversationMeta>,
         metrics_service_name: Option<String>,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
         inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
@@ -947,6 +982,7 @@ impl ThreadManagerState {
             skills_watcher: Arc::clone(&self.skills_watcher),
             conversation_history: initial_history,
             session_source,
+            side_conversation,
             agent_control,
             dynamic_tools,
             persist_extended_history,

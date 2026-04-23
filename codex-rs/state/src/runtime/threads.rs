@@ -26,6 +26,8 @@ SELECT
     threads.approval_mode,
     threads.tokens_used,
     threads.first_user_message,
+    threads.side_parent_thread_id,
+    threads.side_parent_turn_id,
     threads.archived_at,
     threads.git_sha,
     threads.git_branch,
@@ -490,13 +492,15 @@ INSERT INTO threads (
     approval_mode,
     tokens_used,
     first_user_message,
+    side_parent_thread_id,
+    side_parent_turn_id,
     archived,
     archived_at,
     git_sha,
     git_branch,
     git_origin_url,
     memory_mode
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING
             "#,
         )
@@ -525,6 +529,8 @@ ON CONFLICT(id) DO NOTHING
         .bind(metadata.approval_mode.as_str())
         .bind(metadata.tokens_used)
         .bind(metadata.first_user_message.as_deref().unwrap_or_default())
+        .bind(metadata.side_parent_thread_id.map(|id| id.to_string()))
+        .bind(metadata.side_parent_turn_id.as_deref())
         .bind(metadata.archived_at.is_some())
         .bind(metadata.archived_at.map(datetime_to_epoch_seconds))
         .bind(metadata.git_sha.as_deref())
@@ -684,13 +690,15 @@ INSERT INTO threads (
     approval_mode,
     tokens_used,
     first_user_message,
+    side_parent_thread_id,
+    side_parent_turn_id,
     archived,
     archived_at,
     git_sha,
     git_branch,
     git_origin_url,
     memory_mode
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     rollout_path = excluded.rollout_path,
     created_at = excluded.created_at,
@@ -711,6 +719,8 @@ ON CONFLICT(id) DO UPDATE SET
     approval_mode = excluded.approval_mode,
     tokens_used = excluded.tokens_used,
     first_user_message = excluded.first_user_message,
+    side_parent_thread_id = excluded.side_parent_thread_id,
+    side_parent_turn_id = excluded.side_parent_turn_id,
     archived = excluded.archived,
     archived_at = excluded.archived_at,
     git_sha = excluded.git_sha,
@@ -743,6 +753,8 @@ ON CONFLICT(id) DO UPDATE SET
         .bind(metadata.approval_mode.as_str())
         .bind(metadata.tokens_used)
         .bind(metadata.first_user_message.as_deref().unwrap_or_default())
+        .bind(metadata.side_parent_thread_id.map(|id| id.to_string()))
+        .bind(metadata.side_parent_turn_id.as_deref())
         .bind(metadata.archived_at.is_some())
         .bind(metadata.archived_at.map(datetime_to_epoch_seconds))
         .bind(metadata.git_sha.as_deref())
@@ -959,6 +971,8 @@ SELECT
     threads.approval_mode,
     threads.tokens_used,
     threads.first_user_message,
+    threads.side_parent_thread_id,
+    threads.side_parent_turn_id,
     threads.archived_at,
     threads.git_sha,
     threads.git_branch,
@@ -1344,6 +1358,7 @@ mod tests {
             meta: SessionMeta {
                 id: thread_id,
                 forked_from_id: None,
+                side_conversation: None,
                 timestamp: metadata.created_at.to_rfc3339(),
                 cwd: PathBuf::new(),
                 originator: String::new(),
@@ -1402,6 +1417,7 @@ mod tests {
             meta: SessionMeta {
                 id: thread_id,
                 forked_from_id: None,
+                side_conversation: None,
                 timestamp: created_at,
                 cwd: PathBuf::new(),
                 originator: String::new(),

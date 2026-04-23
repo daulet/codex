@@ -347,6 +347,17 @@
         "flex"
       ],
       "type": "string"
+    },
+    "ThreadForkSideConversationParams": {
+      "properties": {
+        "parentTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
     }
   },
   "description": "There are two ways to fork a thread: 1. By thread_id: load the thread from disk by thread_id and fork it into a new thread. 2. By path: load the thread from disk by path and fork it into a new thread.\n\nIf using path, the thread_id param will be ignored.\n\nPrefer using thread_id whenever possible.",
@@ -450,6 +461,17 @@
           "type": "null"
         }
       ]
+    },
+    "sideConversation": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/ThreadForkSideConversationParams"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Marks this fork as a persisted side conversation attached to the source thread. When `parentTurnId` is omitted, the server attaches the side thread to the source thread's current tree leaf."
     },
     "threadId": {
       "type": "string"
