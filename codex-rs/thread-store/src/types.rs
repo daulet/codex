@@ -11,6 +11,7 @@ use codex_protocol::protocol::GitInfo;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SideConversationMeta;
 use codex_protocol::protocol::ThreadMemoryMode as MemoryMode;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TokenUsage;
@@ -47,6 +48,8 @@ pub struct CreateThreadParams {
     pub thread_id: ThreadId,
     /// Source thread id when this thread is created as a fork.
     pub forked_from_id: Option<ThreadId>,
+    /// Side-conversation parent metadata when this thread was created by `/side`.
+    pub side_conversation: Option<SideConversationMeta>,
     /// Runtime source for the thread.
     pub source: SessionSource,
     /// Optional analytics source classification for this thread.
@@ -303,6 +306,8 @@ pub struct StoredThread {
     pub rollout_path: Option<PathBuf>,
     /// Source thread id when this thread was forked from another thread.
     pub forked_from_id: Option<ThreadId>,
+    /// Side-conversation parent metadata when this thread was created by `/side`.
+    pub side_conversation: Option<SideConversationMeta>,
     /// Best available user-facing preview, usually the first user message.
     pub preview: String,
     /// Optional user-facing thread name/title.

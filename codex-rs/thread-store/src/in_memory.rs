@@ -318,6 +318,7 @@ fn stored_thread_from_state(
         thread_id,
         rollout_path,
         forked_from_id: created.forked_from_id,
+        side_conversation: created.side_conversation.clone(),
         preview: String::new(),
         name,
         model_provider: "test".to_string(),

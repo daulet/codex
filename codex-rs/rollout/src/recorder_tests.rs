@@ -1203,6 +1203,8 @@ fn fill_missing_thread_item_metadata_preserves_identity_and_prefers_state_git_fi
     let mut item = ThreadItem {
         path: filesystem_path.clone(),
         thread_id: Some(filesystem_thread_id),
+        forked_from_id: None,
+        side_conversation: None,
         first_user_message: Some("filesystem message".to_string()),
         cwd: None,
         git_branch: Some("filesystem-branch".to_string()),
@@ -1219,6 +1221,8 @@ fn fill_missing_thread_item_metadata_preserves_identity_and_prefers_state_git_fi
     let state_item = ThreadItem {
         path: state_path,
         thread_id: Some(state_thread_id),
+        forked_from_id: None,
+        side_conversation: None,
         first_user_message: Some("state message".to_string()),
         cwd: Some(PathBuf::from("/tmp/state-cwd")),
         git_branch: Some("state-branch".to_string()),

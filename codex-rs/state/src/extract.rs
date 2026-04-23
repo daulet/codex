@@ -66,6 +66,10 @@ fn apply_session_meta_from_item(metadata: &mut ThreadMetadata, meta_line: &Sessi
         metadata.git_branch = git.branch.clone();
         metadata.git_origin_url = git.repository_url.clone();
     }
+    if let Some(side_conversation) = meta_line.meta.side_conversation.as_ref() {
+        metadata.side_parent_thread_id = Some(side_conversation.parent_thread_id);
+        metadata.side_parent_turn_id = side_conversation.parent_turn_id.clone();
+    }
 }
 
 fn apply_turn_context(metadata: &mut ThreadMetadata, turn_ctx: &TurnContextItem) {
@@ -245,6 +249,7 @@ mod tests {
                     forked_from_id: Some(
                         ThreadId::from_string(&Uuid::now_v7().to_string()).expect("thread id"),
                     ),
+                    side_conversation: None,
                     timestamp: "2026-02-26T00:00:00.000Z".to_string(),
                     cwd: PathBuf::from("/child/worktree"),
                     originator: "codex_cli_rs".to_string(),
@@ -379,6 +384,7 @@ mod tests {
                 meta: SessionMeta {
                     id: thread_id,
                     forked_from_id: None,
+                    side_conversation: None,
                     timestamp: "2026-02-26T00:00:00.000Z".to_string(),
                     cwd: PathBuf::from("/workspace"),
                     originator: "codex_cli_rs".to_string(),
@@ -425,6 +431,8 @@ mod tests {
             approval_mode: "on-request".to_string(),
             tokens_used: 1,
             first_user_message: None,
+            side_parent_thread_id: None,
+            side_parent_turn_id: None,
             archived_at: None,
             git_sha: None,
             git_branch: None,

@@ -396,6 +396,11 @@ pub struct ThreadForkParams {
     /// Optional client-supplied analytics source classification for this forked thread.
     #[ts(optional = nullable)]
     pub thread_source: Option<ThreadSource>,
+    /// Marks this fork as a persisted side conversation attached to the source
+    /// thread. When `parentTurnId` is omitted, the server attaches the side
+    /// thread to the source thread's current tree leaf.
+    #[ts(optional = nullable)]
+    pub side_conversation: Option<ThreadForkSideConversationParams>,
     /// When true, return only thread metadata and live fork state without
     /// populating `thread.turns`. This is useful when the client plans to call
     /// `thread/turns/list` immediately after forking.
@@ -408,6 +413,14 @@ pub struct ThreadForkParams {
     #[experimental("thread/fork.persistFullHistory")]
     #[serde(default)]
     pub persist_extended_history: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadForkSideConversationParams {
+    #[ts(optional = nullable)]
+    pub parent_turn_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]

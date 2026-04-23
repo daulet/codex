@@ -18,6 +18,8 @@ use codex_app_server_protocol::SessionSource;
 use codex_app_server_protocol::SortDirection;
 use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
+use codex_app_server_protocol::ThreadForkSideConversationParams;
+use codex_app_server_protocol::ThreadInjectItemsParams;
 use codex_app_server_protocol::ThreadItem;
 use codex_app_server_protocol::ThreadListParams;
 use codex_app_server_protocol::ThreadListResponse;
@@ -745,6 +747,84 @@ async fn thread_read_returns_forked_from_id_for_forked_threads() -> Result<()> {
     let ThreadReadResponse { thread, .. } = to_response::<ThreadReadResponse>(read_resp)?;
 
     assert_eq!(thread.forked_from_id, Some(conversation_id));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn thread_read_hides_inherited_history_for_side_conversations() -> Result<()> {
+    let server = create_mock_responses_server_repeating_assistant("Done").await;
+    let codex_home = TempDir::new()?;
+    create_config_toml(codex_home.path(), &server.uri())?;
+
+    let conversation_id = create_fake_rollout_with_text_elements(
+        codex_home.path(),
+        "2025-01-05T12-00-00",
+        "2025-01-05T12:00:00Z",
+        "Saved user message",
+        vec![],
+        Some("mock_provider"),
+        /*git_info*/ None,
+    )?;
+
+    let mut mcp = McpProcess::new(codex_home.path()).await?;
+    timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
+
+    let parent_turn_id = "rollout-1".to_string();
+    let fork_id = mcp
+        .send_thread_fork_request(ThreadForkParams {
+            thread_id: conversation_id.clone(),
+            side_conversation: Some(ThreadForkSideConversationParams {
+                parent_turn_id: Some(parent_turn_id.clone()),
+            }),
+            ..Default::default()
+        })
+        .await?;
+    let fork_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(fork_id)),
+    )
+    .await??;
+    let ThreadForkResponse { thread: forked, .. } = to_response::<ThreadForkResponse>(fork_resp)?;
+
+    let inject_id = mcp
+        .send_thread_inject_items_request(ThreadInjectItemsParams {
+            thread_id: forked.id.clone(),
+            items: vec![json!({
+                "type": "message",
+                "role": "user",
+                "content": [{
+                    "type": "input_text",
+                    "text": "Side conversation boundary.\n\nInherited history is reference context only."
+                }]
+            })],
+        })
+        .await?;
+    timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(inject_id)),
+    )
+    .await??;
+
+    let read_id = mcp
+        .send_thread_read_request(ThreadReadParams {
+            thread_id: forked.id,
+            include_turns: true,
+        })
+        .await?;
+    let read_resp: JSONRPCResponse = timeout(
+        DEFAULT_READ_TIMEOUT,
+        mcp.read_stream_until_response_message(RequestId::Integer(read_id)),
+    )
+    .await??;
+    let ThreadReadResponse { thread, .. } = to_response::<ThreadReadResponse>(read_resp)?;
+
+    let side_conversation = thread
+        .side_conversation
+        .expect("side conversation metadata");
+    assert_eq!(side_conversation.parent_thread_id, conversation_id);
+    assert_eq!(side_conversation.parent_turn_id, Some(parent_turn_id));
+    assert_eq!(thread.turns, Vec::new());
 
     Ok(())
 }

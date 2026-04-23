@@ -151,6 +151,8 @@ SELECT
     threads.approval_mode,
     threads.tokens_used,
     threads.first_user_message,
+    threads.side_parent_thread_id,
+    threads.side_parent_turn_id,
     threads.archived_at,
     threads.git_sha,
     threads.git_branch,

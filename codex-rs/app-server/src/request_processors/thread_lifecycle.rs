@@ -695,12 +695,60 @@ pub(crate) fn populate_thread_turns_from_history(
     items: &[RolloutItem],
     active_turn: Option<&Turn>,
 ) {
-    let active_branch_items = codex_rollout::active_branch_items(items);
+    let visible_items = visible_rollout_items_for_thread(thread, items);
+    let active_branch_items = codex_rollout::active_branch_items(&visible_items);
     let mut turns = build_api_turns_from_rollout_items(&active_branch_items);
     if let Some(active_turn) = active_turn {
         merge_turn_history_with_active_turn(&mut turns, active_turn.clone());
     }
     thread.turns = turns;
+}
+
+pub(crate) fn visible_rollout_items_for_thread(thread: &Thread, items: &[RolloutItem]) -> Vec<RolloutItem> {
+    let Some(side_conversation) = thread.side_conversation.as_ref() else {
+        return items.to_vec();
+    };
+    visible_rollout_items_after_side_boundary(items, side_conversation.parent_turn_id.as_deref())
+}
+
+pub(crate) fn visible_rollout_items_after_side_boundary(
+    items: &[RolloutItem],
+    parent_turn_id: Option<&str>,
+) -> Vec<RolloutItem> {
+    let mut start_index = parent_turn_id
+        .and_then(|parent_turn_id| {
+            build_thread_tree(items)
+                .turns
+                .into_iter()
+                .find(|turn| turn.turn_id == parent_turn_id)
+                .map(|turn| turn.rollout_end_index)
+        })
+        .unwrap_or(0)
+        .min(items.len());
+
+    if let Some(boundary_offset) = items[start_index..]
+        .iter()
+        .position(is_side_boundary_prompt_rollout_item)
+    {
+        start_index += boundary_offset + 1;
+    }
+
+    items[start_index..].to_vec()
+}
+
+fn is_side_boundary_prompt_rollout_item(item: &RolloutItem) -> bool {
+    let RolloutItem::ResponseItem(ResponseItem::Message { role, content, .. }) = item else {
+        return false;
+    };
+    if role != "user" {
+        return false;
+    }
+    content.iter().any(|item| match item {
+        ContentItem::InputText { text } => {
+            text.trim_start().starts_with("Side conversation boundary.")
+        }
+        _ => false,
+    })
 }
 
 pub(super) async fn resolve_pending_server_request(

@@ -643,6 +643,8 @@ async fn test_list_conversations_latest_first() {
             ThreadItem {
                 path: p1,
                 thread_id: Some(thread_id_from_uuid(u3)),
+                forked_from_id: None,
+                side_conversation: None,
                 first_user_message: Some("Hello from user".to_string()),
                 cwd: Some(Path::new(".").to_path_buf()),
                 git_branch: None,
@@ -659,6 +661,8 @@ async fn test_list_conversations_latest_first() {
             ThreadItem {
                 path: p2,
                 thread_id: Some(thread_id_from_uuid(u2)),
+                forked_from_id: None,
+                side_conversation: None,
                 first_user_message: Some("Hello from user".to_string()),
                 cwd: Some(Path::new(".").to_path_buf()),
                 git_branch: None,
@@ -675,6 +679,8 @@ async fn test_list_conversations_latest_first() {
             ThreadItem {
                 path: p3,
                 thread_id: Some(thread_id_from_uuid(u1)),
+                forked_from_id: None,
+                side_conversation: None,
                 first_user_message: Some("Hello from user".to_string()),
                 cwd: Some(Path::new(".").to_path_buf()),
                 git_branch: None,
@@ -784,6 +790,8 @@ async fn test_pagination_cursor() {
             ThreadItem {
                 path: p5,
                 thread_id: Some(thread_id_from_uuid(u5)),
+                forked_from_id: None,
+                side_conversation: None,
                 first_user_message: Some("Hello from user".to_string()),
                 cwd: Some(Path::new(".").to_path_buf()),
                 git_branch: None,
@@ -800,6 +808,8 @@ async fn test_pagination_cursor() {
             ThreadItem {
                 path: p4,
                 thread_id: Some(thread_id_from_uuid(u4)),
+                forked_from_id: None,
+                side_conversation: None,
                 first_user_message: Some("Hello from user".to_string()),
                 cwd: Some(Path::new(".").to_path_buf()),
                 git_branch: None,
@@ -852,6 +862,8 @@ async fn test_pagination_cursor() {
             ThreadItem {
                 path: p3,
                 thread_id: Some(thread_id_from_uuid(u3)),
+                forked_from_id: None,
+                side_conversation: None,
                 first_user_message: Some("Hello from user".to_string()),
                 cwd: Some(Path::new(".").to_path_buf()),
                 git_branch: None,
@@ -868,6 +880,8 @@ async fn test_pagination_cursor() {
             ThreadItem {
                 path: p2,
                 thread_id: Some(thread_id_from_uuid(u2)),
+                forked_from_id: None,
+                side_conversation: None,
                 first_user_message: Some("Hello from user".to_string()),
                 cwd: Some(Path::new(".").to_path_buf()),
                 git_branch: None,
@@ -912,6 +926,8 @@ async fn test_pagination_cursor() {
         items: vec![ThreadItem {
             path: p1,
             thread_id: Some(thread_id_from_uuid(u1)),
+            forked_from_id: None,
+            side_conversation: None,
             first_user_message: Some("Hello from user".to_string()),
             cwd: Some(Path::new(".").to_path_buf()),
             git_branch: None,
@@ -1004,6 +1020,8 @@ async fn test_get_thread_contents() {
         items: vec![ThreadItem {
             path: expected_path,
             thread_id: Some(thread_id_from_uuid(uuid)),
+            forked_from_id: None,
+            side_conversation: None,
             first_user_message: Some("Hello from user".to_string()),
             cwd: Some(Path::new(".").to_path_buf()),
             git_branch: None,
@@ -1209,6 +1227,7 @@ async fn test_updated_at_uses_file_mtime() -> Result<()> {
             meta: SessionMeta {
                 id: conversation_id,
                 forked_from_id: None,
+                side_conversation: None,
                 timestamp: ts.to_string(),
                 cwd: ".".into(),
                 originator: "test_originator".into(),
@@ -1352,6 +1371,8 @@ async fn test_timestamp_only_cursor_skips_same_second_filesystem_ties() {
             ThreadItem {
                 path: p3,
                 thread_id: Some(thread_id_from_uuid(u3)),
+                forked_from_id: None,
+                side_conversation: None,
                 first_user_message: Some("Hello from user".to_string()),
                 cwd: Some(Path::new(".").to_path_buf()),
                 git_branch: None,
@@ -1368,6 +1389,8 @@ async fn test_timestamp_only_cursor_skips_same_second_filesystem_ties() {
             ThreadItem {
                 path: p2,
                 thread_id: Some(thread_id_from_uuid(u2)),
+                forked_from_id: None,
+                side_conversation: None,
                 first_user_message: Some("Hello from user".to_string()),
                 cwd: Some(Path::new(".").to_path_buf()),
                 git_branch: None,
