@@ -1,60 +1,41 @@
-<p align="center"><code>npm i -g @openai/codex</code><br />or <code>brew install --cask codex</code></p>
-<p align="center"><strong>Codex CLI</strong> is a coding agent from OpenAI that runs locally on your computer.
-<p align="center">
-  <img src="https://github.com/openai/codex/blob/main/.github/codex-cli-splash.png" alt="Codex CLI splash" width="80%" />
-</p>
-</br>
-If you want Codex in your code editor (VS Code, Cursor, Windsurf), <a href="https://developers.openai.com/codex/ide">install in your IDE.</a>
-</br>If you want the desktop app experience, run <code>codex app</code> or visit <a href="https://chatgpt.com/codex?app-landing-page=true">the Codex App page</a>.
-</br>If you are looking for the <em>cloud-based agent</em> from OpenAI, <strong>Codex Web</strong>, go to <a href="https://chatgpt.com/codex">chatgpt.com/codex</a>.</p>
+# Codex CLI Fork
 
----
+This is a fork of [OpenAI Codex CLI](https://github.com/openai/codex) with custom features. Fork baseline: [openai/codex `rust-v0.124.0`](https://github.com/openai/codex/releases/tag/rust-v0.124.0). Everything not called out below should be assumed to follow upstream Codex behavior and documentation.
 
-## Quickstart
+## Install
 
-### Installing and running Codex CLI
-
-Install globally with your preferred package manager:
+### macOS
 
 ```shell
-# Install using npm
-npm install -g @openai/codex
+brew install daulet/tap/codex
 ```
+
+### Debian/Ubuntu
 
 ```shell
-# Install using Homebrew
-brew install --cask codex
+curl -fsSL https://github.com/daulet/codex/releases/latest/download/install-deb.sh | sh
 ```
 
-Then simply run `codex` to get started.
+### From Source
 
-<details>
-<summary>You can also go to the <a href="https://github.com/openai/codex/releases/latest">latest GitHub Release</a> and download the appropriate binary for your platform.</summary>
+```shell
+git clone https://github.com/daulet/codex.git
+cd codex/codex-rs
+cargo build --release --bin codex
+./target/release/codex
+```
 
-Each GitHub Release contains many executables, but in practice, you likely want one of these:
+## Fork Features
 
-- macOS
-  - Apple Silicon/arm64: `codex-aarch64-apple-darwin.tar.gz`
-  - x86_64 (older Mac hardware): `codex-x86_64-apple-darwin.tar.gz`
-- Linux
-  - x86_64: `codex-x86_64-unknown-linux-musl.tar.gz`
-  - arm64: `codex-aarch64-unknown-linux-musl.tar.gz`
+- Persistent `/side` conversations: side discussions are saved as real conversation branches instead of temporary scratch sessions.
+- Branch-aware `/tree`: the tree view shows side discussions alongside normal conversation branches and can resume them.
+- Branch persistence metadata: side branches keep parent thread and parent turn linkage so conversation history is no longer modeled as one flat prompt/response list.
+- Fork release automation: GitHub Actions builds macOS and Debian artifacts, publishes GitHub Releases, and updates `daulet/tap/codex`.
 
-Each archive contains a single entry with the platform baked into the name (e.g., `codex-x86_64-unknown-linux-musl`), so you likely want to rename it to `codex` after extracting it.
+## Upstream Codex
 
-</details>
+For general Codex usage, authentication, configuration, IDE integrations, and development docs, use the upstream resources:
 
-### Using Codex with your ChatGPT plan
-
-Run `codex` and select **Sign in with ChatGPT**. We recommend signing into your ChatGPT account to use Codex as part of your Plus, Pro, Business, Edu, or Enterprise plan. [Learn more about what's included in your ChatGPT plan](https://help.openai.com/en/articles/11369540-codex-in-chatgpt).
-
-You can also use Codex with an API key, but this requires [additional setup](https://developers.openai.com/codex/auth#sign-in-with-an-api-key).
-
-## Docs
-
-- [**Codex Documentation**](https://developers.openai.com/codex)
-- [**Contributing**](./docs/contributing.md)
-- [**Installing & building**](./docs/install.md)
-- [**Open source fund**](./docs/open-source-fund.md)
-
-This repository is licensed under the [Apache-2.0 License](LICENSE).
+- [OpenAI Codex repository](https://github.com/openai/codex)
+- [Codex documentation](https://developers.openai.com/codex)
+- [Install and build notes](docs/install.md)
