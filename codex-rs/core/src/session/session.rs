@@ -85,6 +85,7 @@ pub(crate) struct SessionConfiguration {
     pub(super) app_server_client_version: Option<String>,
     /// Source of the session (cli, vscode, exec, mcp, ...)
     pub(super) session_source: SessionSource,
+    pub(super) side_conversation: Option<SideConversationMeta>,
     pub(super) dynamic_tools: Vec<DynamicToolSpec>,
     pub(super) persist_extended_history: bool,
     pub(super) inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
@@ -395,6 +396,7 @@ impl Session {
                             CreateThreadParams {
                                 thread_id: conversation_id,
                                 forked_from_id,
+                                side_conversation: session_configuration.side_conversation.clone(),
                                 source: session_source,
                                 base_instructions: BaseInstructions {
                                     text: session_configuration.base_instructions.clone(),

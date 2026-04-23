@@ -6,6 +6,7 @@ import type { JsonValue } from "../serde_json/JsonValue";
 import type { ApprovalsReviewer } from "./ApprovalsReviewer";
 import type { AskForApproval } from "./AskForApproval";
 import type { SandboxMode } from "./SandboxMode";
+import type { ThreadForkSideConversationParams } from "./ThreadForkSideConversationParams";
 
 /**
  * There are two ways to fork a thread:
@@ -28,4 +29,9 @@ approvalsReviewer?: ApprovalsReviewer | null, sandbox?: SandboxMode | null, conf
  * populating `thread.turns`. This is useful when the client plans to call
  * `thread/turns/list` immediately after forking.
  */
-excludeTurns?: boolean};
+excludeTurns?: boolean, /**
+ * Marks this fork as a persisted side conversation attached to the source
+ * thread. When `parentTurnId` is omitted, the server attaches the side
+ * thread to the source thread's current tree leaf.
+ */
+sideConversation?: ThreadForkSideConversationParams | null};

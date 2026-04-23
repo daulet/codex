@@ -3844,11 +3844,24 @@ pub struct ThreadForkParams {
     /// `thread/turns/list` immediately after forking.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub exclude_turns: bool,
+    /// Marks this fork as a persisted side conversation attached to the source
+    /// thread. When `parentTurnId` is omitted, the server attaches the side
+    /// thread to the source thread's current tree leaf.
+    #[ts(optional = nullable)]
+    pub side_conversation: Option<ThreadForkSideConversationParams>,
     /// If true, persist additional rollout EventMsg variants required to
     /// reconstruct a richer thread history on subsequent resume/fork/read.
     #[experimental("thread/fork.persistFullHistory")]
     #[serde(default)]
     pub persist_extended_history: bool,
+}
+
+#[derive(Serialize, Deserialize, Debug, Default, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadForkSideConversationParams {
+    #[ts(optional = nullable)]
+    pub parent_turn_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS, ExperimentalApi)]
@@ -5019,6 +5032,8 @@ pub struct Thread {
     pub id: String,
     /// Source thread id when this thread was created by forking another thread.
     pub forked_from_id: Option<String>,
+    /// Parent metadata when this thread is a persisted `/side` discussion.
+    pub side_conversation: Option<ThreadSideConversation>,
     /// Usually the first user message in the thread, if available.
     pub preview: String,
     /// Whether the thread is ephemeral and should not be materialized on disk.
@@ -5054,6 +5069,14 @@ pub struct Thread {
     /// For all other responses and notifications returning a Thread,
     /// the turns field will be an empty list.
     pub turns: Vec<Turn>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export_to = "v2/")]
+pub struct ThreadSideConversation {
+    pub parent_thread_id: String,
+    pub parent_turn_id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, JsonSchema, TS)]

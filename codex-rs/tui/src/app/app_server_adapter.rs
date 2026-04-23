@@ -1323,6 +1323,7 @@ mod tests {
         let thread = Thread {
             id: "019cee8c-b993-7e33-88c0-014d4e62612d".to_string(),
             forked_from_id: None,
+            side_conversation: None,
             preview: String::new(),
             ephemeral: false,
             model_provider: "openai".to_string(),
@@ -1499,6 +1500,7 @@ mod tests {
             &Thread {
                 id: thread_id.to_string(),
                 forked_from_id: None,
+                side_conversation: None,
                 preview: "hello".to_string(),
                 ephemeral: false,
                 model_provider: "openai".to_string(),

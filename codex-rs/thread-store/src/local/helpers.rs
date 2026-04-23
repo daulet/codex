@@ -106,7 +106,8 @@ pub(super) fn stored_thread_from_rollout_item(
     Some(StoredThread {
         thread_id,
         rollout_path: Some(item.path),
-        forked_from_id: None,
+        forked_from_id: item.forked_from_id,
+        side_conversation: item.side_conversation,
         preview,
         name: None,
         model_provider: item

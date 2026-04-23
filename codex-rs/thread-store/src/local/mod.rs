@@ -571,6 +571,7 @@ mod tests {
         CreateThreadParams {
             thread_id,
             forked_from_id: None,
+            side_conversation: None,
             source: SessionSource::Exec,
             base_instructions: BaseInstructions::default(),
             dynamic_tools: Vec::new(),

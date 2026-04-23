@@ -109,6 +109,7 @@ use codex_protocol::protocol::RawResponseItemEvent;
 use codex_protocol::protocol::ReviewRequest;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SideConversationMeta;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::TurnAbortReason;
 use codex_protocol::protocol::TurnContextItem;
@@ -393,6 +394,7 @@ pub(crate) struct CodexSpawnArgs {
     pub(crate) skills_watcher: Arc<SkillsWatcher>,
     pub(crate) conversation_history: InitialHistory,
     pub(crate) session_source: SessionSource,
+    pub(crate) side_conversation: Option<SideConversationMeta>,
     pub(crate) agent_control: AgentControl,
     pub(crate) dynamic_tools: Vec<DynamicToolSpec>,
     pub(crate) persist_extended_history: bool,
@@ -454,6 +456,7 @@ impl Codex {
             skills_watcher,
             conversation_history,
             session_source,
+            side_conversation,
             agent_control,
             dynamic_tools,
             persist_extended_history,
@@ -615,6 +618,7 @@ impl Codex {
             app_server_client_name: None,
             app_server_client_version: None,
             session_source,
+            side_conversation,
             dynamic_tools,
             persist_extended_history,
             inherited_shell_snapshot,

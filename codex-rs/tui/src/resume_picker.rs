@@ -2069,6 +2069,7 @@ mod tests {
         let thread = Thread {
             id: thread_id.to_string(),
             forked_from_id: None,
+            side_conversation: None,
             preview: String::from("remote thread"),
             ephemeral: false,
             model_provider: String::from("openai"),

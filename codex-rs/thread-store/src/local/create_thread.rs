@@ -14,9 +14,10 @@ pub(super) async fn create_thread(
     let state_db_ctx = store.state_db().await;
     let recorder = RolloutRecorder::new(
         &store.config,
-        RolloutRecorderParams::new(
+        RolloutRecorderParams::new_with_side_conversation(
             params.thread_id,
             params.forked_from_id,
+            params.side_conversation,
             params.source,
             params.base_instructions,
             params.dynamic_tools,

@@ -2777,6 +2777,7 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
             thread: Thread {
                 id: agent_thread_id.to_string(),
                 forked_from_id: None,
+                side_conversation: None,
                 preview: "agent thread".to_string(),
                 ephemeral: false,
                 model_provider: "agent-provider".to_string(),
@@ -2858,6 +2859,7 @@ async fn inactive_thread_started_notification_preserves_primary_model_when_path_
             thread: Thread {
                 id: agent_thread_id.to_string(),
                 forked_from_id: None,
+                side_conversation: None,
                 preview: "agent thread".to_string(),
                 ephemeral: false,
                 model_provider: "agent-provider".to_string(),
@@ -2912,6 +2914,7 @@ async fn thread_read_session_state_does_not_reuse_primary_permission_profile() {
     let thread = Thread {
         id: read_thread_id.to_string(),
         forked_from_id: None,
+        side_conversation: None,
         preview: "read thread".to_string(),
         ephemeral: false,
         model_provider: "read-provider".to_string(),
@@ -3001,7 +3004,7 @@ fn agent_picker_item_name_snapshot() {
 }
 
 #[tokio::test]
-async fn side_fork_config_is_ephemeral_and_appends_developer_guardrails() {
+async fn side_fork_config_is_persisted_and_appends_developer_guardrails() {
     let mut app = make_test_app().await;
     app.config.developer_instructions = Some("Existing developer policy.".to_string());
     let original_approval_policy = app.config.permissions.approval_policy.value();
@@ -3009,7 +3012,7 @@ async fn side_fork_config_is_ephemeral_and_appends_developer_guardrails() {
 
     let fork_config = app.side_fork_config();
 
-    assert!(fork_config.ephemeral);
+    assert!(!fork_config.ephemeral);
     assert_eq!(
         fork_config.permissions.approval_policy.value(),
         original_approval_policy
@@ -3357,7 +3360,7 @@ async fn discard_side_thread_removes_agent_navigation_entry() -> Result<()> {
     let mut app_server =
         crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref()).await?;
     let mut side_config = app.chat_widget.config_ref().clone();
-    side_config.ephemeral = true;
+    side_config.ephemeral = false;
     let started = app_server.start_thread(&side_config).await?;
     let side_thread_id = started.session.thread_id;
     app.side_threads
@@ -3380,7 +3383,7 @@ async fn discard_side_thread_removes_agent_navigation_entry() -> Result<()> {
 }
 
 #[tokio::test]
-async fn discard_side_thread_keeps_local_state_when_server_close_fails() -> Result<()> {
+async fn discard_side_thread_removes_local_state_when_side_thread_is_not_loaded() -> Result<()> {
     let mut app = make_test_app().await;
     let mut app_server =
         crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref()).await?;
@@ -3397,18 +3400,13 @@ async fn discard_side_thread_keeps_local_state_when_server_close_fails() -> Resu
     );
 
     assert!(
-        !app.discard_side_thread(&mut app_server, side_thread_id)
+        app.discard_side_thread(&mut app_server, side_thread_id)
             .await
     );
 
-    assert_eq!(app.active_thread_id, Some(side_thread_id));
-    assert_eq!(
-        app.side_threads
-            .get(&side_thread_id)
-            .map(|state| state.parent_thread_id),
-        Some(parent_thread_id)
-    );
-    assert!(app.agent_navigation.get(&side_thread_id).is_some());
+    assert_eq!(app.active_thread_id, None);
+    assert!(!app.side_threads.contains_key(&side_thread_id));
+    assert_eq!(app.agent_navigation.get(&side_thread_id), None);
     Ok(())
 }
 
@@ -4827,6 +4825,7 @@ async fn thread_rollback_response_discards_queued_active_thread_events() {
             thread: Thread {
                 id: thread_id.to_string(),
                 forked_from_id: None,
+                side_conversation: None,
                 preview: String::new(),
                 ephemeral: false,
                 model_provider: "openai".to_string(),

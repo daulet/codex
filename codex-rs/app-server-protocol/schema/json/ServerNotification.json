@@ -2969,6 +2969,17 @@
           "description": "Usually the first user message in the thread, if available.",
           "type": "string"
         },
+        "sideConversation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadSideConversation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Parent metadata when this thread is a persisted `/side` discussion."
+        },
         "source": {
           "allOf": [
             {
@@ -3988,6 +3999,23 @@
         "role",
         "text",
         "threadId"
+      ],
+      "type": "object"
+    },
+    "ThreadSideConversation": {
+      "properties": {
+        "parentThreadId": {
+          "type": "string"
+        },
+        "parentTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "parentThreadId"
       ],
       "type": "object"
     },

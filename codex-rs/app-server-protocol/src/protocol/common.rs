@@ -551,6 +551,7 @@ client_request_definitions! {
     },
     ThreadNavigate => "thread/navigate" {
         params: v2::ThreadNavigateParams,
+        serialization: thread_id(params.thread_id),
         response: v2::ThreadNavigateResponse,
     },
     ThreadList => "thread/list" {
@@ -2111,6 +2112,7 @@ mod tests {
                 thread: v2::Thread {
                     id: "67e55044-10b1-426f-9247-bb680e5fe0c8".to_string(),
                     forked_from_id: None,
+                    side_conversation: None,
                     preview: "first prompt".to_string(),
                     ephemeral: true,
                     model_provider: "openai".to_string(),
@@ -2151,6 +2153,7 @@ mod tests {
                     "thread": {
                         "id": "67e55044-10b1-426f-9247-bb680e5fe0c8",
                         "forkedFromId": null,
+                        "sideConversation": null,
                         "preview": "first prompt",
                         "ephemeral": true,
                         "modelProvider": "openai",
