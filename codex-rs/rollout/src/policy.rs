@@ -100,6 +100,7 @@ fn event_msg_persistence_mode(ev: &EventMsg) -> Option<EventPersistenceMode> {
         | EventMsg::EnteredReviewMode(_)
         | EventMsg::ExitedReviewMode(_)
         | EventMsg::ThreadRolledBack(_)
+        | EventMsg::ThreadNavigated(_)
         | EventMsg::UndoCompleted(_)
         | EventMsg::TurnAborted(_)
         | EventMsg::TurnStarted(_)

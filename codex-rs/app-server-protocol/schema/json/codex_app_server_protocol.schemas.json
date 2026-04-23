@@ -504,6 +504,30 @@
             },
             "method": {
               "enum": [
+                "thread/navigate"
+              ],
+              "title": "Thread/navigateRequestMethod",
+              "type": "string"
+            },
+            "params": {
+              "$ref": "#/definitions/v2/ThreadNavigateParams"
+            }
+          },
+          "required": [
+            "id",
+            "method",
+            "params"
+          ],
+          "title": "Thread/navigateRequest",
+          "type": "object"
+        },
+        {
+          "properties": {
+            "id": {
+              "$ref": "#/definitions/v2/RequestId"
+            },
+            "method": {
+              "enum": [
                 "thread/list"
               ],
               "title": "Thread/listRequestMethod",
@@ -16082,6 +16106,44 @@
           "threadId"
         ],
         "title": "ThreadNameUpdatedNotification",
+        "type": "object"
+      },
+      "ThreadNavigateParams": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "targetTurnId": {
+            "description": "Existing turn id to make active. Omit or pass null to navigate to the root.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "threadId": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "threadId"
+        ],
+        "title": "ThreadNavigateParams",
+        "type": "object"
+      },
+      "ThreadNavigateResponse": {
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "properties": {
+          "thread": {
+            "allOf": [
+              {
+                "$ref": "#/definitions/v2/Thread"
+              }
+            ],
+            "description": "The updated thread after navigation, with `turns` populated.\n\nThe ThreadItems stored in each Turn are lossy since we explicitly do not persist all agent interactions, such as command executions. This is the same behavior as `thread/resume`."
+          }
+        },
+        "required": [
+          "thread"
+        ],
+        "title": "ThreadNavigateResponse",
         "type": "object"
       },
       "ThreadReadParams": {

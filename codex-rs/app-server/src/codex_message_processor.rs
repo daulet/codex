@@ -181,6 +181,7 @@ use codex_app_server_protocol::ThreadMetadataGitInfoUpdateParams;
 use codex_app_server_protocol::ThreadMetadataUpdateParams;
 use codex_app_server_protocol::ThreadMetadataUpdateResponse;
 use codex_app_server_protocol::ThreadNameUpdatedNotification;
+use codex_app_server_protocol::ThreadNavigateParams;
 use codex_app_server_protocol::ThreadReadParams;
 use codex_app_server_protocol::ThreadReadResponse;
 use codex_app_server_protocol::ThreadRealtimeAppendAudioParams;
@@ -1065,6 +1066,10 @@ impl CodexMessageProcessor {
             }
             ClientRequest::ThreadRollback { request_id, params } => {
                 self.thread_rollback(to_connection_request_id(request_id), params)
+                    .await;
+            }
+            ClientRequest::ThreadNavigate { request_id, params } => {
+                self.thread_navigate(to_connection_request_id(request_id), params)
                     .await;
             }
             ClientRequest::ThreadList { request_id, params } => {
@@ -3588,19 +3593,21 @@ impl CodexMessageProcessor {
 
         let request = request_id.clone();
 
-        let rollback_already_in_progress = {
+        let history_navigation_already_in_progress = {
             let thread_state = self.thread_state_manager.thread_state(thread_id).await;
             let mut thread_state = thread_state.lock().await;
-            if thread_state.pending_rollbacks.is_some() {
+            if thread_state.pending_rollbacks.is_some()
+                || thread_state.pending_thread_navigation.is_some()
+            {
                 true
             } else {
                 thread_state.pending_rollbacks = Some(request.clone());
                 false
             }
         };
-        if rollback_already_in_progress {
+        if history_navigation_already_in_progress {
             return Err(invalid_request(
-                "rollback already in progress for this thread",
+                "thread history navigation already in progress for this thread",
             ));
         }
 
@@ -3620,6 +3627,58 @@ impl CodexMessageProcessor {
             return Err(internal_error(format!("failed to start rollback: {err}")));
         }
         Ok(())
+    }
+
+    async fn thread_navigate(&self, request_id: ConnectionRequestId, params: ThreadNavigateParams) {
+        let ThreadNavigateParams {
+            thread_id,
+            target_turn_id,
+        } = params;
+
+        let (thread_id, thread) = match self.load_thread(&thread_id).await {
+            Ok(v) => v,
+            Err(error) => {
+                self.outgoing.send_error(request_id, error).await;
+                return;
+            }
+        };
+
+        let request = request_id.clone();
+        let history_navigation_already_in_progress = {
+            let thread_state = self.thread_state_manager.thread_state(thread_id).await;
+            let mut thread_state = thread_state.lock().await;
+            if thread_state.pending_rollbacks.is_some()
+                || thread_state.pending_thread_navigation.is_some()
+            {
+                true
+            } else {
+                thread_state.pending_thread_navigation = Some(request.clone());
+                false
+            }
+        };
+        if history_navigation_already_in_progress {
+            self.send_invalid_request_error(
+                request.clone(),
+                "thread history navigation already in progress for this thread".to_string(),
+            )
+            .await;
+            return;
+        }
+
+        if let Err(err) = self
+            .submit_core_op(
+                &request_id,
+                thread.as_ref(),
+                Op::ThreadNavigate { target_turn_id },
+            )
+            .await
+        {
+            let thread_state = self.thread_state_manager.thread_state(thread_id).await;
+            thread_state.lock().await.pending_thread_navigation = None;
+
+            self.send_internal_error(request, format!("failed to start tree navigation: {err}"))
+                .await;
+        }
     }
 
     async fn thread_compact_start(
@@ -3945,7 +4004,8 @@ impl CodexMessageProcessor {
                 let (mut thread, history) =
                     thread_from_stored_thread(stored_thread, fallback_provider, &self.config.cwd);
                 if include_turns && let Some(history) = history {
-                    thread.turns = build_turns_from_rollout_items(&history.items);
+                    let items = codex_rollout::active_branch_items(&history.items);
+                    thread.turns = build_turns_from_rollout_items(&items);
                 }
                 Ok(Some(thread))
             }
@@ -8474,7 +8534,10 @@ async fn populate_thread_turns(
     active_turn: Option<&Turn>,
 ) -> std::result::Result<(), String> {
     let mut turns = match turn_source {
-        ThreadTurnSource::HistoryItems(items) => build_turns_from_rollout_items(items),
+        ThreadTurnSource::HistoryItems(items) => {
+            let items = codex_rollout::active_branch_items(items);
+            build_turns_from_rollout_items(&items)
+        }
     };
     if let Some(active_turn) = active_turn {
         merge_turn_history_with_active_turn(&mut turns, active_turn.clone());
@@ -9409,7 +9472,7 @@ pub(crate) async fn read_rollout_items_from_rollout(
         InitialHistory::Resumed(resumed) => resumed.history,
     };
 
-    Ok(items)
+    Ok(codex_rollout::active_branch_items(&items))
 }
 
 fn extract_conversation_summary(
