@@ -18,6 +18,8 @@ use codex_utils_sandbox_summary::summarize_permission_profile;
 
 use super::status_state::TerminalTitleStatusKind;
 
+const FORK_STATUS_BADGE: &str = "[FORK daulet/codex]";
+
 /// Items shown in the terminal title when the user has not configured a
 /// custom selection. Intentionally minimal: activity indicator + project name.
 pub(super) const DEFAULT_TERMINAL_TITLE_ITEMS: [&str; 2] = ["activity", "project-name"];
@@ -175,10 +177,22 @@ impl ChatWidget {
             }
         }
 
-        self.set_status_line(status_line_from_segments(
-            segments,
-            self.config.tui_status_line_use_colors,
-        ));
+        let show_fork_badge = selections.status_line_items.iter().any(|item| {
+            matches!(
+                item,
+                StatusLineItem::ModelName | StatusLineItem::ModelWithReasoning
+            )
+        });
+        let mut line = status_line_from_segments(segments, self.config.tui_status_line_use_colors);
+        if show_fork_badge && let Some(line) = line.as_mut() {
+            line.spans.push(" · ".dim());
+            line.spans.push(if self.config.tui_status_line_use_colors {
+                FORK_STATUS_BADGE.cyan().dim()
+            } else {
+                FORK_STATUS_BADGE.dim()
+            });
+        }
+        self.set_status_line(line);
         let hyperlink_url = selections
             .status_line_items
             .contains(&StatusLineItem::PullRequestNumber)
