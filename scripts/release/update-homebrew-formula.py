@@ -49,10 +49,10 @@ def formula_text(
 ) -> str:
     base_url = f"https://github.com/{repo}/releases/download/{release_tag}"
     return f'''class Codex < Formula
-  desc "Codex CLI fork with persistent tree and side conversations"
+  desc "AI coding assistant fork with persistent tree and side conversations"
   homepage "https://github.com/{repo}"
-  license "Apache-2.0"
   version "{version}"
+  license "Apache-2.0"
 
   depends_on "ripgrep"
 
