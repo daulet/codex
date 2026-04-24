@@ -1438,7 +1438,9 @@ async fn status_line_model_with_reasoning_includes_fast_for_fast_capable_models(
 
     assert_eq!(
         status_line_text(&chat),
-        Some(format!("gpt-5.4 xhigh fast · Context 0% used · {test_cwd}"))
+        Some(format!(
+            "[FORK daulet/codex] · gpt-5.4 xhigh fast · Context 0% used · {test_cwd}"
+        ))
     );
 
     chat.set_model("gpt-5.3-codex");
@@ -1447,7 +1449,7 @@ async fn status_line_model_with_reasoning_includes_fast_for_fast_capable_models(
     assert_eq!(
         status_line_text(&chat),
         Some(format!(
-            "gpt-5.3-codex xhigh · Context 0% used · {test_cwd}"
+            "[FORK daulet/codex] · gpt-5.3-codex xhigh · Context 0% used · {test_cwd}"
         ))
     );
 }
@@ -1474,7 +1476,7 @@ async fn status_line_model_with_reasoning_updates_on_mode_switch_without_manual_
 
     assert_eq!(
         status_line_text(&chat),
-        Some("gpt-5.3-codex high".to_string())
+        Some("[FORK daulet/codex] · gpt-5.3-codex high".to_string())
     );
 
     let plan_mask = collaboration_modes::plan_mask(chat.model_catalog.as_ref())
@@ -1483,7 +1485,7 @@ async fn status_line_model_with_reasoning_updates_on_mode_switch_without_manual_
 
     assert_eq!(
         status_line_text(&chat),
-        Some("gpt-5.3-codex medium".to_string())
+        Some("[FORK daulet/codex] · gpt-5.3-codex medium".to_string())
     );
 
     let default_mask = collaboration_modes::default_mask(chat.model_catalog.as_ref())
@@ -1492,7 +1494,7 @@ async fn status_line_model_with_reasoning_updates_on_mode_switch_without_manual_
 
     assert_eq!(
         status_line_text(&chat),
-        Some("gpt-5.3-codex high".to_string())
+        Some("[FORK daulet/codex] · gpt-5.3-codex high".to_string())
     );
 }
 
