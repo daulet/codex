@@ -266,7 +266,7 @@ jobs:
         working-directory: homebrew-tap
         run: |
           set -euo pipefail
-          if git diff --quiet -- Formula/codex.rb; then
+          if [[ -z "$(git status --short -- Formula/codex.rb)" ]]; then
             echo "Formula/codex.rb is already up to date."
             exit 0
           fi
