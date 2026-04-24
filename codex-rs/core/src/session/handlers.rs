@@ -785,36 +785,26 @@ pub async fn thread_navigate(sess: &Arc<Session>, sub_id: String, target_turn_id
     }
 
     let turn_context = sess.new_default_turn_with_sub_id(sub_id).await;
-    let rollout_path = {
-        let recorder = {
-            let guard = sess.services.rollout.lock().await;
-            guard.clone()
-        };
-        let Some(recorder) = recorder else {
+    let live_thread = match sess.live_thread_for_persistence("navigate thread tree") {
+        Ok(live_thread) => live_thread,
+        Err(_) => {
             sess.send_event_raw(Event {
                 id: turn_context.sub_id.clone(),
                 msg: EventMsg::Error(ErrorEvent {
-                    message: "thread tree navigation requires a persisted rollout path".to_string(),
+                    message: "thread tree navigation requires persisted thread history"
+                        .to_string(),
                     codex_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
                 }),
             })
             .await;
             return;
-        };
-        recorder.rollout_path().to_path_buf()
+        }
     };
-    if let Some(recorder) = {
-        let guard = sess.services.rollout.lock().await;
-        guard.clone()
-    } && let Err(err) = recorder.flush().await
-    {
+    if let Err(err) = live_thread.flush().await {
         sess.send_event_raw(Event {
             id: turn_context.sub_id.clone(),
             msg: EventMsg::Error(ErrorEvent {
-                message: format!(
-                    "failed to flush rollout `{}` for tree navigation replay: {err}",
-                    rollout_path.display()
-                ),
+                message: format!("failed to flush thread persistence for tree navigation replay: {err}"),
                 codex_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
             }),
         })
@@ -822,16 +812,13 @@ pub async fn thread_navigate(sess: &Arc<Session>, sub_id: String, target_turn_id
         return;
     }
 
-    let initial_history = match RolloutRecorder::get_rollout_history(rollout_path.as_path()).await {
+    let stored_history = match live_thread.load_history(/*include_archived*/ false).await {
         Ok(history) => history,
         Err(err) => {
             sess.send_event_raw(Event {
                 id: turn_context.sub_id.clone(),
                 msg: EventMsg::Error(ErrorEvent {
-                    message: format!(
-                        "failed to load rollout `{}` for tree navigation replay: {err}",
-                        rollout_path.display()
-                    ),
+                    message: format!("failed to load thread history for tree navigation replay: {err}"),
                     codex_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
                 }),
             })
@@ -840,7 +827,7 @@ pub async fn thread_navigate(sess: &Arc<Session>, sub_id: String, target_turn_id
         }
     };
 
-    let rollout_items = initial_history.get_rollout_items();
+    let rollout_items = stored_history.items;
     if let Some(target_turn_id) = target_turn_id.as_deref()
         && !codex_rollout::thread_tree_contains_turn_id(&rollout_items, target_turn_id)
     {

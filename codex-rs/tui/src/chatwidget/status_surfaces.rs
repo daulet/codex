@@ -6,6 +6,8 @@
 use super::*;
 use crate::status::format_tokens_compact;
 
+const FORK_STATUS_BADGE: &str = "[FORK daulet/codex]";
+
 /// Items shown in the terminal title when the user has not configured a
 /// custom selection. Intentionally minimal: activity indicator + project name.
 pub(super) const DEFAULT_TERMINAL_TITLE_ITEMS: [&str; 2] = ["activity", "project-name"];
@@ -160,7 +162,23 @@ impl ChatWidget {
         let line = if parts.is_empty() {
             None
         } else {
-            Some(Line::from(parts.join(" · ")))
+            let show_fork_badge = selections.status_line_items.iter().any(|item| {
+                matches!(
+                    item,
+                    StatusLineItem::ModelName | StatusLineItem::ModelWithReasoning
+                )
+            });
+            let mut spans = Vec::new();
+            if show_fork_badge {
+                spans.push(FORK_STATUS_BADGE.cyan().dim());
+            }
+            for part in parts {
+                if !spans.is_empty() {
+                    spans.push(" · ".dim());
+                }
+                spans.push(part.into());
+            }
+            Some(Line::from(spans))
         };
         self.set_status_line(line);
     }
