@@ -76,6 +76,9 @@ jobs:
     needs: metadata
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
+    env:
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: 16
+      CARGO_PROFILE_RELEASE_LTO: thin
     defaults:
       run:
         working-directory: codex-rs
@@ -95,6 +98,8 @@ jobs:
             deb_arch: arm64
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ needs.metadata.outputs.release_tag }}
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
@@ -112,7 +117,7 @@ jobs:
 
       - name: Build codex
         shell: bash
-        run: cargo build --locked --target "${{ matrix.target }}" --release --bin codex
+        run: cargo build --locked --target "${{ matrix.target }}" --release --package codex-cli --bin codex
 
       - name: Package tarball
         shell: bash
@@ -155,6 +160,8 @@ jobs:
       repo: ${{ needs.metadata.outputs.repo }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          ref: ${{ needs.metadata.outputs.release_tag }}
 
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -188,7 +195,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TAP_REPOSITORY: ${{ vars.HOMEBREW_TAP_REPOSITORY || 'daulet/homebrew-tap' }}
-      TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN }}
+      TAP_GITHUB_TOKEN: ${{ secrets.TAP_GITHUB_TOKEN || secrets.HOMEBREW_TAP_TOKEN }}
     steps:
       - name: Check tap token
         id: tap_token
@@ -211,7 +218,7 @@ jobs:
         if: steps.tap_token.outputs.available == 'true'
         with:
           repository: ${{ env.TAP_REPOSITORY }}
-          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          token: ${{ env.TAP_GITHUB_TOKEN }}
           path: homebrew-tap
 
       - name: Download release checksums
