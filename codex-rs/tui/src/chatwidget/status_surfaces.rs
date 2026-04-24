@@ -8,6 +8,8 @@ use crate::bottom_pane::status_line_from_segments;
 use crate::branch_summary;
 use crate::status::format_tokens_compact;
 
+const FORK_STATUS_BADGE: &str = "[FORK daulet/codex]";
+
 /// Items shown in the terminal title when the user has not configured a
 /// custom selection. Intentionally minimal: activity indicator + project name.
 pub(super) const DEFAULT_TERMINAL_TITLE_ITEMS: [&str; 2] = ["activity", "project-name"];
@@ -178,10 +180,22 @@ impl ChatWidget {
             }
         }
 
-        self.set_status_line(status_line_from_segments(
+        let show_fork_badge = selections.status_line_items.iter().any(|item| {
+            matches!(
+                item,
+                StatusLineItem::ModelName | StatusLineItem::ModelWithReasoning
+            )
+        });
+        let mut line = status_line_from_segments(
             segments,
             self.config.tui_status_line_use_colors,
-        ));
+        );
+        if show_fork_badge && let Some(line) = line.as_mut() {
+            let mut spans = vec![FORK_STATUS_BADGE.cyan().dim(), " · ".dim()];
+            spans.append(&mut line.spans);
+            line.spans = spans;
+        }
+        self.set_status_line(line);
         let hyperlink_url = selections
             .status_line_items
             .contains(&StatusLineItem::PullRequestNumber)
