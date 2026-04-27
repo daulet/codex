@@ -32,10 +32,50 @@ runs:
       shell: pwsh
       run: Copy-Item (Get-Command dotslash).Source -Destination "$env:LOCALAPPDATA\Microsoft\WindowsApps\dotslash.exe"
 
-    - name: Set up Bazel
-      uses: bazelbuild/setup-bazelisk@b39c379c82683a5f25d34f0d062761f62693e0b2 # v3
-      with:
-        bazelisk-version: 1.28.1
+    - name: Set up Bazelisk (Unix)
+      if: runner.os != 'Windows'
+      shell: bash
+      run: |
+        set -euo pipefail
+        case "${RUNNER_OS}-${RUNNER_ARCH}" in
+          Linux-X64)
+            asset="bazelisk-linux-amd64"
+            ;;
+          Linux-ARM64)
+            asset="bazelisk-linux-arm64"
+            ;;
+          macOS-X64)
+            asset="bazelisk-darwin-amd64"
+            ;;
+          macOS-ARM64)
+            asset="bazelisk-darwin-arm64"
+            ;;
+          *)
+            echo "Unsupported Bazelisk platform: ${RUNNER_OS}-${RUNNER_ARCH}" >&2
+            exit 1
+            ;;
+        esac
+        install_dir="${RUNNER_TEMP}/bazelisk"
+        mkdir -p "${install_dir}"
+        curl -fsSL "https://github.com/bazelbuild/bazelisk/releases/download/v1.28.1/${asset}" -o "${install_dir}/bazel"
+        chmod +x "${install_dir}/bazel"
+        echo "${install_dir}" >> "$GITHUB_PATH"
+
+    - name: Set up Bazelisk (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $asset = switch ($env:RUNNER_ARCH) {
+          'X64' { 'bazelisk-windows-amd64.exe' }
+          'ARM64' { 'bazelisk-windows-arm64.exe' }
+          default { throw "Unsupported Bazelisk architecture: $env:RUNNER_ARCH" }
+        }
+        $installDir = Join-Path $env:RUNNER_TEMP 'bazelisk'
+        New-Item -ItemType Directory -Force -Path $installDir | Out-Null
+        Invoke-WebRequest `
+          -Uri "https://github.com/bazelbuild/bazelisk/releases/download/v1.28.1/$asset" `
+          -OutFile (Join-Path $installDir 'bazel.exe')
+        $installDir | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
     - name: Configure Bazel repository cache
       id: configure_bazel_repository_cache
