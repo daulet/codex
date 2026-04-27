@@ -165,6 +165,7 @@ fn sample_thread_with_metadata(
         id: thread_id.to_string(),
         session_id: format!("session-{thread_id}"),
         forked_from_id: None,
+        side_conversation: None,
         preview: "first prompt".to_string(),
         ephemeral,
         model_provider: "openai".to_string(),
@@ -189,7 +190,7 @@ fn sample_thread_start_response(
     ephemeral: bool,
     model: &str,
 ) -> ClientResponsePayload {
-    ClientResponsePayload::ThreadStart(ThreadStartResponse {
+    ThreadStartResponse {
         thread: sample_thread_with_metadata(
             thread_id,
             ephemeral,
@@ -207,7 +208,8 @@ fn sample_thread_start_response(
         sandbox: AppServerSandboxPolicy::DangerFullAccess,
         active_permission_profile: None,
         reasoning_effort: None,
-    })
+    }
+    .into()
 }
 
 fn sample_app_server_client_metadata() -> CodexAppServerClientMetadata {
@@ -250,7 +252,7 @@ fn sample_thread_resume_response_with_source(
     source: AppServerSessionSource,
     thread_source: Option<AppServerThreadSource>,
 ) -> ClientResponsePayload {
-    ClientResponsePayload::ThreadResume(ThreadResumeResponse {
+    ThreadResumeResponse {
         thread: sample_thread_with_metadata(thread_id, ephemeral, source, thread_source),
         model: model.to_string(),
         model_provider: "openai".to_string(),
@@ -263,7 +265,8 @@ fn sample_thread_resume_response_with_source(
         sandbox: AppServerSandboxPolicy::DangerFullAccess,
         active_permission_profile: None,
         reasoning_effort: None,
-    })
+    }
+    .into()
 }
 
 fn sample_turn_start_request(thread_id: &str, request_id: i64) -> ClientRequest {
@@ -287,7 +290,7 @@ fn sample_turn_start_request(thread_id: &str, request_id: i64) -> ClientRequest 
 }
 
 fn sample_turn_start_response(turn_id: &str) -> ClientResponsePayload {
-    ClientResponsePayload::TurnStart(codex_app_server_protocol::TurnStartResponse {
+    codex_app_server_protocol::TurnStartResponse {
         turn: Turn {
             id: turn_id.to_string(),
             items_view: codex_app_server_protocol::TurnItemsView::Full,
@@ -298,7 +301,8 @@ fn sample_turn_start_response(turn_id: &str) -> ClientResponsePayload {
             completed_at: None,
             duration_ms: None,
         },
-    })
+    }
+    .into()
 }
 
 fn sample_turn_started_notification(thread_id: &str, turn_id: &str) -> ServerNotification {
@@ -406,9 +410,10 @@ fn sample_turn_steer_request(
 }
 
 fn sample_turn_steer_response(turn_id: &str) -> ClientResponsePayload {
-    ClientResponsePayload::TurnSteer(TurnSteerResponse {
+    TurnSteerResponse {
         turn_id: turn_id.to_string(),
-    })
+    }
+    .into()
 }
 
 fn no_active_turn_steer_error() -> JSONRPCErrorError {
@@ -1679,9 +1684,7 @@ async fn unrelated_client_responses_are_ignored_by_reducer() {
             AnalyticsFact::ClientResponse {
                 connection_id: 7,
                 request_id: RequestId::Integer(9),
-                response: Box::new(ClientResponsePayload::ThreadArchive(
-                    ThreadArchiveResponse {},
-                )),
+                response: Box::new(ThreadArchiveResponse {}.into()),
             },
             &mut events,
         )
