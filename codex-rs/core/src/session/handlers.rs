@@ -607,8 +607,7 @@ pub async fn thread_navigate(sess: &Arc<Session>, sub_id: String, target_turn_id
             sess.send_event_raw(Event {
                 id: turn_context.sub_id.clone(),
                 msg: EventMsg::Error(ErrorEvent {
-                    message: "thread tree navigation requires persisted thread history"
-                        .to_string(),
+                    message: "thread tree navigation requires persisted thread history".to_string(),
                     codex_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
                 }),
             })
@@ -636,7 +635,9 @@ pub async fn thread_navigate(sess: &Arc<Session>, sub_id: String, target_turn_id
             sess.send_event_raw(Event {
                 id: turn_context.sub_id.clone(),
                 msg: EventMsg::Error(ErrorEvent {
-                    message: format!("failed to load thread history for tree navigation replay: {err}"),
+                    message: format!(
+                        "failed to load thread history for tree navigation replay: {err}"
+                    ),
                     codex_error_info: Some(CodexErrorInfo::ThreadRollbackFailed),
                 }),
             })

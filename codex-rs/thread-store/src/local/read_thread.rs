@@ -30,6 +30,14 @@ pub(super) async fn read_thread(
     params: ReadThreadParams,
 ) -> ThreadStoreResult<StoredThread> {
     let thread_id = params.thread_id;
+    if let Ok(path) = super::live_writer::rollout_path(store, thread_id).await
+        && !tokio::fs::try_exists(&path).await.unwrap_or(false)
+    {
+        return Err(ThreadStoreError::InvalidRequest {
+            message: format!("no rollout found for thread id {thread_id}"),
+        });
+    }
+
     if let Some(metadata) = read_sqlite_metadata(store, thread_id).await
         && (params.include_archived
             || (metadata.archived_at.is_none()
@@ -195,8 +203,8 @@ async fn resolve_rollout_path(
             )
             .await
             .map_err(|err| ThreadStoreError::InvalidRequest {
-                message: format!("failed to locate archived thread id {thread_id}: {err}"),
-            }),
+            message: format!("failed to locate archived thread id {thread_id}: {err}"),
+        }),
         }
     } else {
         find_thread_path_by_id_str(
