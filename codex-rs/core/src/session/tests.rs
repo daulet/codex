@@ -2310,8 +2310,11 @@ async fn thread_rollback_fails_when_turn_in_progress() {
 
 #[tokio::test]
 async fn thread_navigate_selects_existing_branch_from_rollout_tree() {
-    let (sess, _tc, rx) = make_session_and_context_with_rx().await;
-    let rollout_path = attach_rollout_recorder(&sess).await;
+    let (mut sess, _tc, rx) = make_session_and_context_with_rx().await;
+    let rollout_path = attach_thread_persistence(
+        Arc::get_mut(&mut sess).expect("session should not have additional references"),
+    )
+    .await;
 
     sess.persist_rollout_items(&[
         RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {

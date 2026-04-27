@@ -261,8 +261,8 @@ macro_rules! client_request_definitions {
         #[derive(Debug, Clone)]
         #[allow(clippy::large_enum_variant)]
         pub enum ClientResponsePayload {
-            $( $variant($response), )*
-            InterruptConversation(v1::InterruptConversationResponse),
+            $( $variant(Box<$response>), )*
+            InterruptConversation(Box<v1::InterruptConversationResponse>),
         }
 
         impl ClientResponsePayload {
@@ -292,7 +292,7 @@ macro_rules! client_request_definitions {
                         Self::$variant(response) => {
                             Some(ClientResponse::$variant {
                                 request_id,
-                                response,
+                                response: *response,
                             })
                         }
                     )*
@@ -326,7 +326,7 @@ macro_rules! client_request_definitions {
 
         impl From<v1::InterruptConversationResponse> for ClientResponsePayload {
             fn from(response: v1::InterruptConversationResponse) -> Self {
-                Self::InterruptConversation(response)
+                Self::InterruptConversation(Box::new(response))
             }
         }
 
@@ -414,7 +414,7 @@ macro_rules! client_response_payload_from_impl {
     ($variant:ident, $response:ty) => {
         impl From<$response> for ClientResponsePayload {
             fn from(response: $response) -> Self {
-                Self::$variant(response)
+                Self::$variant(Box::new(response))
             }
         }
     };

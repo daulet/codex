@@ -983,11 +983,9 @@ impl MessageProcessor {
         params: ConfigValueWriteParams,
     ) {
         let result = self.config_api.write_value(params).await;
-        self.handle_config_mutation_result(
-            request_id,
-            result,
-            ClientResponsePayload::ConfigValueWrite,
-        )
+        self.handle_config_mutation_result(request_id, result, |response| {
+            ClientResponsePayload::ConfigValueWrite(Box::new(response))
+        })
         .await
     }
 
@@ -997,11 +995,9 @@ impl MessageProcessor {
         params: ConfigBatchWriteParams,
     ) {
         let result = self.config_api.batch_write(params).await;
-        self.handle_config_mutation_result(
-            request_id,
-            result,
-            ClientResponsePayload::ConfigBatchWrite,
-        )
+        self.handle_config_mutation_result(request_id, result, |response| {
+            ClientResponsePayload::ConfigBatchWrite(Box::new(response))
+        })
         .await;
     }
 
@@ -1016,11 +1012,9 @@ impl MessageProcessor {
             .set_experimental_feature_enablement(params)
             .await;
         let is_ok = result.is_ok();
-        self.handle_config_mutation_result(
-            request_id,
-            result,
-            ClientResponsePayload::ExperimentalFeatureEnablementSet,
-        )
+        self.handle_config_mutation_result(request_id, result, |response| {
+            ClientResponsePayload::ExperimentalFeatureEnablementSet(Box::new(response))
+        })
         .await;
         if should_refresh_apps_list && is_ok {
             self.refresh_apps_list_after_experimental_feature_enablement_set()

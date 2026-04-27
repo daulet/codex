@@ -77,6 +77,7 @@ fn sample_thread(thread_id: &str) -> Thread {
     Thread {
         id: thread_id.to_string(),
         forked_from_id: None,
+        side_conversation: None,
         preview: "first prompt".to_string(),
         ephemeral: false,
         model_provider: "openai".to_string(),
@@ -100,7 +101,7 @@ fn sample_permission_profile() -> AppServerPermissionProfile {
 }
 
 fn sample_thread_start_response() -> ClientResponsePayload {
-    ClientResponsePayload::ThreadStart(ThreadStartResponse {
+    ThreadStartResponse {
         thread: sample_thread("thread-1"),
         model: "gpt-5".to_string(),
         model_provider: "openai".to_string(),
@@ -113,11 +114,12 @@ fn sample_thread_start_response() -> ClientResponsePayload {
         permission_profile: Some(sample_permission_profile()),
         active_permission_profile: None,
         reasoning_effort: None,
-    })
+    }
+    .into()
 }
 
 fn sample_thread_resume_response() -> ClientResponsePayload {
-    ClientResponsePayload::ThreadResume(ThreadResumeResponse {
+    ThreadResumeResponse {
         thread: sample_thread("thread-2"),
         model: "gpt-5".to_string(),
         model_provider: "openai".to_string(),
@@ -130,11 +132,12 @@ fn sample_thread_resume_response() -> ClientResponsePayload {
         permission_profile: Some(sample_permission_profile()),
         active_permission_profile: None,
         reasoning_effort: None,
-    })
+    }
+    .into()
 }
 
 fn sample_thread_fork_response() -> ClientResponsePayload {
-    ClientResponsePayload::ThreadFork(ThreadForkResponse {
+    ThreadForkResponse {
         thread: sample_thread("thread-3"),
         model: "gpt-5".to_string(),
         model_provider: "openai".to_string(),
@@ -147,11 +150,12 @@ fn sample_thread_fork_response() -> ClientResponsePayload {
         permission_profile: Some(sample_permission_profile()),
         active_permission_profile: None,
         reasoning_effort: None,
-    })
+    }
+    .into()
 }
 
 fn sample_turn_start_response() -> ClientResponsePayload {
-    ClientResponsePayload::TurnStart(TurnStartResponse {
+    TurnStartResponse {
         turn: Turn {
             id: "turn-1".to_string(),
             items: Vec::new(),
@@ -161,13 +165,15 @@ fn sample_turn_start_response() -> ClientResponsePayload {
             completed_at: None,
             duration_ms: None,
         },
-    })
+    }
+    .into()
 }
 
 fn sample_turn_steer_response() -> ClientResponsePayload {
-    ClientResponsePayload::TurnSteer(TurnSteerResponse {
+    TurnSteerResponse {
         turn_id: "turn-2".to_string(),
-    })
+    }
+    .into()
 }
 
 #[test]
@@ -215,7 +221,7 @@ fn track_response_only_enqueues_analytics_relevant_responses() {
     client.track_response(
         /*connection_id*/ 7,
         RequestId::Integer(6),
-        ClientResponsePayload::ThreadArchive(ThreadArchiveResponse {}),
+        ThreadArchiveResponse {}.into(),
     );
     assert!(matches!(receiver.try_recv(), Err(TryRecvError::Empty)));
 }

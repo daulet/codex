@@ -989,9 +989,7 @@ mod tests {
         outgoing
             .send_response(
                 request_id.clone(),
-                ClientResponsePayload::ThreadArchive(
-                    codex_app_server_protocol::ThreadArchiveResponse {},
-                ),
+                codex_app_server_protocol::ThreadArchiveResponse {},
             )
             .await;
 
@@ -1039,9 +1037,7 @@ mod tests {
         outgoing
             .send_response(
                 request_id,
-                ClientResponsePayload::ThreadArchive(
-                    codex_app_server_protocol::ThreadArchiveResponse {},
-                ),
+                codex_app_server_protocol::ThreadArchiveResponse {},
             )
             .await;
 

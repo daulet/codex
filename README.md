@@ -1,6 +1,6 @@
 # Codex CLI Fork
 
-This is a fork of [OpenAI Codex CLI](https://github.com/openai/codex) with custom features. Fork baseline: [openai/codex `rust-v0.124.0`](https://github.com/openai/codex/releases/tag/rust-v0.124.0). Everything not called out below should be assumed to follow upstream Codex behavior and documentation.
+This is a fork of [OpenAI Codex CLI](https://github.com/openai/codex) with custom features. Fork baseline: [openai/codex `rust-v0.125.0`](https://github.com/openai/codex/releases/tag/rust-v0.125.0). Everything not called out below should be assumed to follow upstream Codex behavior and documentation.
 
 ## Install
 

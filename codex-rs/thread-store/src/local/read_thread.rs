@@ -27,6 +27,14 @@ pub(super) async fn read_thread(
     params: ReadThreadParams,
 ) -> ThreadStoreResult<StoredThread> {
     let thread_id = params.thread_id;
+    if let Ok(path) = super::live_writer::rollout_path(store, thread_id).await
+        && !tokio::fs::try_exists(&path).await.unwrap_or(false)
+    {
+        return Err(ThreadStoreError::InvalidRequest {
+            message: format!("no rollout found for thread id {thread_id}"),
+        });
+    }
+
     if let Some(metadata) = read_sqlite_metadata(store, thread_id).await
         && (params.include_archived || metadata.archived_at.is_none())
         && (!params.include_history
@@ -139,29 +147,36 @@ async fn resolve_rollout_path(
     thread_id: codex_protocol::ThreadId,
     include_archived: bool,
 ) -> ThreadStoreResult<Option<std::path::PathBuf>> {
-    if include_archived {
-        match find_thread_path_by_id_str(store.config.codex_home.as_path(), &thread_id.to_string())
-            .await
-            .map_err(|err| ThreadStoreError::InvalidRequest {
-                message: format!("failed to locate thread id {thread_id}: {err}"),
-            })? {
-            Some(path) => Ok(Some(path)),
-            None => find_archived_thread_path_by_id_str(
-                store.config.codex_home.as_path(),
-                &thread_id.to_string(),
-            )
-            .await
-            .map_err(|err| ThreadStoreError::InvalidRequest {
-                message: format!("failed to locate archived thread id {thread_id}: {err}"),
-            }),
+    let codex_home = store.config.codex_home.clone();
+    tokio::spawn(async move {
+        if include_archived {
+            match find_thread_path_by_id_str(codex_home.as_path(), &thread_id.to_string())
+                .await
+                .map_err(|err| ThreadStoreError::InvalidRequest {
+                    message: format!("failed to locate thread id {thread_id}: {err}"),
+                })? {
+                Some(path) => Ok(Some(path)),
+                None => find_archived_thread_path_by_id_str(
+                    codex_home.as_path(),
+                    &thread_id.to_string(),
+                )
+                .await
+                .map_err(|err| ThreadStoreError::InvalidRequest {
+                    message: format!("failed to locate archived thread id {thread_id}: {err}"),
+                }),
+            }
+        } else {
+            find_thread_path_by_id_str(codex_home.as_path(), &thread_id.to_string())
+                .await
+                .map_err(|err| ThreadStoreError::InvalidRequest {
+                    message: format!("failed to locate thread id {thread_id}: {err}"),
+                })
         }
-    } else {
-        find_thread_path_by_id_str(store.config.codex_home.as_path(), &thread_id.to_string())
-            .await
-            .map_err(|err| ThreadStoreError::InvalidRequest {
-                message: format!("failed to locate thread id {thread_id}: {err}"),
-            })
-    }
+    })
+    .await
+    .map_err(|err| ThreadStoreError::Internal {
+        message: format!("failed to join rollout path lookup for thread {thread_id}: {err}"),
+    })?
 }
 
 async fn read_thread_from_rollout_path(
@@ -209,13 +224,17 @@ async fn read_sqlite_metadata(
     store: &LocalThreadStore,
     thread_id: codex_protocol::ThreadId,
 ) -> Option<ThreadMetadata> {
-    let runtime = StateRuntime::init(
-        store.config.sqlite_home.clone(),
-        store.config.model_provider_id.clone(),
-    )
+    let sqlite_home = store.config.sqlite_home.clone();
+    let model_provider_id = store.config.model_provider_id.clone();
+    tokio::spawn(async move {
+        let runtime = StateRuntime::init(sqlite_home, model_provider_id)
+            .await
+            .ok()?;
+        runtime.get_thread(thread_id).await.ok().flatten()
+    })
     .await
-    .ok()?;
-    runtime.get_thread(thread_id).await.ok().flatten()
+    .ok()
+    .flatten()
 }
 
 async fn stored_thread_from_sqlite_metadata(
