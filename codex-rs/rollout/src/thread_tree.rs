@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::EventMsg;
+use codex_protocol::protocol::InterAgentCommunication;
 use codex_protocol::protocol::RolloutItem;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -21,6 +22,7 @@ pub struct ThreadTreeTurn {
     pub children: Vec<usize>,
     pub depth: usize,
     pub user_message: Option<String>,
+    pub counts_as_user_turn: bool,
     pub started_at: Option<i64>,
     pub completed_at: Option<i64>,
     pub is_active_path: bool,
@@ -42,6 +44,7 @@ struct PendingTurn {
     turn_id: String,
     parent_turn_id: Option<String>,
     user_message: Option<String>,
+    counts_as_user_turn: bool,
     started_at: Option<i64>,
     completed_at: Option<i64>,
     started_explicitly: bool,
@@ -69,6 +72,7 @@ pub fn build_thread_tree(items: &[RolloutItem]) -> ThreadTree {
                     turn_id: event.turn_id.clone(),
                     parent_turn_id: current_leaf_turn_id.clone(),
                     user_message: None,
+                    counts_as_user_turn: false,
                     started_at: event.started_at,
                     completed_at: None,
                     started_explicitly: true,
@@ -79,7 +83,7 @@ pub fn build_thread_tree(items: &[RolloutItem]) -> ThreadTree {
             }
             RolloutItem::EventMsg(EventMsg::UserMessage(event)) => {
                 if let Some(turn) = pending_turn.as_ref()
-                    && turn.user_message.is_some()
+                    && turn.counts_as_user_turn
                     && !turn.started_explicitly
                     && !(turn.started_from_response_item
                         && turn.user_message.as_deref() == Some(event.message.as_str()))
@@ -95,6 +99,7 @@ pub fn build_thread_tree(items: &[RolloutItem]) -> ThreadTree {
                     turn_id: fallback_turn_id(index),
                     parent_turn_id: current_leaf_turn_id.clone(),
                     user_message: None,
+                    counts_as_user_turn: false,
                     started_at: None,
                     completed_at: None,
                     started_explicitly: false,
@@ -105,6 +110,7 @@ pub fn build_thread_tree(items: &[RolloutItem]) -> ThreadTree {
                 if turn.user_message.is_none() {
                     turn.user_message = Some(event.message.clone());
                 }
+                turn.counts_as_user_turn = true;
                 turn.rollout_end_index = index + 1;
             }
             RolloutItem::EventMsg(EventMsg::TurnComplete(event)) => {
@@ -121,16 +127,24 @@ pub fn build_thread_tree(items: &[RolloutItem]) -> ThreadTree {
                     &mut current_leaf_turn_id,
                 );
             }
-            RolloutItem::EventMsg(EventMsg::TurnAborted(_)) => {
-                if let Some(turn) = pending_turn.as_mut() {
-                    turn.rollout_end_index = index + 1;
+            RolloutItem::EventMsg(EventMsg::TurnAborted(event)) => {
+                let aborts_pending_turn = pending_turn.as_ref().is_some_and(|turn| {
+                    event
+                        .turn_id
+                        .as_ref()
+                        .is_none_or(|turn_id| turn_id == &turn.turn_id)
+                });
+                if aborts_pending_turn {
+                    if let Some(turn) = pending_turn.as_mut() {
+                        turn.rollout_end_index = index + 1;
+                    }
+                    finish_pending_turn(
+                        &mut pending_turn,
+                        &mut turns,
+                        &mut turn_index_by_id,
+                        &mut current_leaf_turn_id,
+                    );
                 }
-                finish_pending_turn(
-                    &mut pending_turn,
-                    &mut turns,
-                    &mut turn_index_by_id,
-                    &mut current_leaf_turn_id,
-                );
             }
             RolloutItem::EventMsg(EventMsg::ThreadRolledBack(event)) => {
                 finish_pending_turn(
@@ -156,12 +170,13 @@ pub fn build_thread_tree(items: &[RolloutItem]) -> ThreadTree {
                 current_leaf_turn_id = event.target_turn_id.clone();
             }
             RolloutItem::ResponseItem(response_item) => {
-                if let Some(message) = user_message_from_response_item(response_item) {
+                if response_item_counts_as_user_turn(response_item) {
+                    let message = user_message_from_response_item(response_item);
                     if let Some(turn) = pending_turn.as_ref()
-                        && turn.user_message.is_some()
+                        && turn.counts_as_user_turn
                         && !turn.started_explicitly
-                        && !(turn.started_from_response_item
-                            && turn.user_message.as_deref() == Some(message.as_str()))
+                        && (turn.user_message.as_deref() != message.as_deref()
+                            || turn.started_from_response_item)
                     {
                         finish_pending_turn(
                             &mut pending_turn,
@@ -174,6 +189,7 @@ pub fn build_thread_tree(items: &[RolloutItem]) -> ThreadTree {
                         turn_id: fallback_turn_id(index),
                         parent_turn_id: current_leaf_turn_id.clone(),
                         user_message: None,
+                        counts_as_user_turn: false,
                         started_at: None,
                         completed_at: None,
                         started_explicitly: false,
@@ -181,9 +197,12 @@ pub fn build_thread_tree(items: &[RolloutItem]) -> ThreadTree {
                         rollout_start_index: index,
                         rollout_end_index: index + 1,
                     });
-                    if turn.user_message.is_none() {
+                    if turn.user_message.is_none()
+                        && let Some(message) = message
+                    {
                         turn.user_message = Some(message);
                     }
+                    turn.counts_as_user_turn = true;
                 }
                 if let Some(turn) = pending_turn.as_mut() {
                     turn.rollout_end_index = index + 1;
@@ -290,10 +309,21 @@ pub fn active_branch_items(items: &[RolloutItem]) -> Vec<RolloutItem> {
             .filter(|item| !is_branch_navigation_item(item))
             .cloned(),
     );
+    let mut last_active_rollout_end_index = None;
     for turn in active_turns {
         selected_items.extend(
             items[turn.rollout_start_index..turn.rollout_end_index]
                 .iter()
+                .filter(|item| !is_branch_navigation_item(item))
+                .cloned(),
+        );
+        last_active_rollout_end_index = Some(turn.rollout_end_index);
+    }
+    if let Some(last_active_rollout_end_index) = last_active_rollout_end_index {
+        selected_items.extend(
+            items[last_active_rollout_end_index..]
+                .iter()
+                .take_while(|item| !turn_starts(item))
                 .filter(|item| !is_branch_navigation_item(item))
                 .cloned(),
         );
@@ -327,6 +357,7 @@ fn finish_pending_turn(
         children: Vec::new(),
         depth: 0,
         user_message: turn.user_message,
+        counts_as_user_turn: turn.counts_as_user_turn,
         started_at: turn.started_at,
         completed_at: turn.completed_at,
         is_active_path: false,
@@ -360,7 +391,7 @@ fn rollback_leaf(
     while remaining > 0 {
         let leaf = leaf_turn_id?;
         let index = turn_index_by_id.get(&leaf).copied()?;
-        if turns[index].user_message.is_some() {
+        if turns[index].counts_as_user_turn {
             remaining -= 1;
         }
         leaf_turn_id = turns[index].parent_turn_id.clone();
@@ -406,6 +437,19 @@ fn user_message_from_response_item(item: &ResponseItem) -> Option<String> {
     if role != "user" {
         return None;
     }
+    user_message_text(content)
+}
+
+fn response_item_counts_as_user_turn(item: &ResponseItem) -> bool {
+    let ResponseItem::Message { role, content, .. } = item else {
+        return false;
+    };
+
+    (role == "user" && user_message_text(content).is_some())
+        || (role == "assistant" && InterAgentCommunication::is_message_content(content))
+}
+
+fn user_message_text(content: &[ContentItem]) -> Option<String> {
     let text = content
         .iter()
         .filter_map(|item| match item {
@@ -416,7 +460,26 @@ fn user_message_from_response_item(item: &ResponseItem) -> Option<String> {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    (!text.is_empty()).then_some(text)
+    (!text.is_empty() && !is_contextual_user_message_text(&text)).then_some(text)
+}
+
+fn is_contextual_user_message_text(text: &str) -> bool {
+    let trimmed = text.trim_start();
+    [
+        "<environment_context>",
+        "# AGENTS.md instructions for ",
+        "<skills_instructions>",
+        "<skill>",
+        "<user_shell_command>",
+        "<turn_aborted>",
+        "<subagent_notification>",
+    ]
+    .iter()
+    .any(|prefix| {
+        trimmed
+            .get(..prefix.len())
+            .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
+    })
 }
 
 fn fallback_turn_id(index: usize) -> String {
@@ -424,12 +487,17 @@ fn fallback_turn_id(index: usize) -> String {
 }
 
 fn turn_starts(item: &RolloutItem) -> bool {
-    matches!(
-        item,
+    match item {
         RolloutItem::EventMsg(EventMsg::TurnStarted(_))
-            | RolloutItem::EventMsg(EventMsg::UserMessage(_))
-            | RolloutItem::ResponseItem(_)
-    )
+        | RolloutItem::EventMsg(EventMsg::UserMessage(_)) => true,
+        RolloutItem::ResponseItem(response_item) => {
+            response_item_counts_as_user_turn(response_item)
+        }
+        RolloutItem::Compacted(_)
+        | RolloutItem::TurnContext(_)
+        | RolloutItem::SessionMeta(_)
+        | RolloutItem::EventMsg(_) => false,
+    }
 }
 
 fn is_branch_navigation_item(item: &RolloutItem) -> bool {
@@ -443,6 +511,7 @@ fn is_branch_navigation_item(item: &RolloutItem) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use codex_protocol::AgentPath;
     use codex_protocol::protocol::CompactedItem;
     use codex_protocol::protocol::ThreadNavigatedEvent;
     use codex_protocol::protocol::ThreadRolledBackEvent;
@@ -514,6 +583,58 @@ mod tests {
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText {
                 text: text.to_string(),
+            }],
+            phase: None,
+        })
+    }
+
+    fn response_message(role: &str, text: &str) -> RolloutItem {
+        RolloutItem::ResponseItem(ResponseItem::Message {
+            id: None,
+            role: role.to_string(),
+            content: vec![ContentItem::InputText {
+                text: text.to_string(),
+            }],
+            phase: None,
+        })
+    }
+
+    fn response_messages(items: &[RolloutItem]) -> Vec<String> {
+        items
+            .iter()
+            .filter_map(|item| {
+                let RolloutItem::ResponseItem(ResponseItem::Message { role, content, .. }) = item
+                else {
+                    return None;
+                };
+                let text = content
+                    .iter()
+                    .filter_map(|item| match item {
+                        ContentItem::InputText { text } | ContentItem::OutputText { text } => {
+                            Some(text.as_str())
+                        }
+                        ContentItem::InputImage { .. } => None,
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                Some(format!("{role}:{text}"))
+            })
+            .collect()
+    }
+
+    fn inter_agent_assistant_message(text: &str) -> RolloutItem {
+        let communication = InterAgentCommunication::new(
+            AgentPath::root(),
+            AgentPath::root().join("worker").expect("recipient path"),
+            Vec::new(),
+            text.to_string(),
+            /*trigger_turn*/ true,
+        );
+        RolloutItem::ResponseItem(ResponseItem::Message {
+            id: None,
+            role: "assistant".to_string(),
+            content: vec![ContentItem::OutputText {
+                text: serde_json::to_string(&communication).expect("serialize communication"),
             }],
             phase: None,
         })
@@ -774,5 +895,54 @@ mod tests {
             active_messages,
             vec!["before rollback".to_string(), "after rollback".to_string(),]
         );
+    }
+
+    #[test]
+    fn legacy_response_items_preserve_context_prefix_and_split_user_turns() {
+        let mut items = vec![
+            response_message("developer", "developer context"),
+            response_message(
+                "user",
+                "<environment_context>\n<cwd>/tmp</cwd>\n</environment_context>",
+            ),
+            response_message("user", "first"),
+            response_message("assistant", "first answer"),
+            response_message("user", "second"),
+            response_message("assistant", "second answer"),
+        ];
+        items.push(RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
+            ThreadRolledBackEvent { num_turns: 1 },
+        )));
+
+        assert_eq!(
+            response_messages(&active_branch_items(&items)),
+            vec![
+                "developer:developer context".to_string(),
+                format!(
+                    "user:{}",
+                    "<environment_context>\n<cwd>/tmp</cwd>\n</environment_context>",
+                ),
+                "user:first".to_string(),
+                "assistant:first answer".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn assistant_inter_agent_response_counts_as_user_turn_for_rollback() {
+        let mut items = vec![
+            response_user_message("first"),
+            response_assistant_message("first response"),
+            inter_agent_assistant_message("follow-up work"),
+        ];
+        items.push(RolloutItem::EventMsg(EventMsg::ThreadRolledBack(
+            ThreadRolledBackEvent { num_turns: 1 },
+        )));
+
+        let tree = build_thread_tree(&items);
+
+        assert_eq!(tree.turns.len(), 2);
+        assert_eq!(tree.active_leaf_turn_id.as_deref(), Some("rollout-0"));
+        assert_eq!(active_branch_user_messages(&items), vec!["first"]);
     }
 }

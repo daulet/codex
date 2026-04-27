@@ -7,7 +7,7 @@ use serde_json::json;
 #[test]
 fn client_response_payload_returns_jsonrpc_parts_and_client_response() -> Result<()> {
     let (request_id, result, payload) =
-        ClientResponsePayload::ThreadArchive(v2::ThreadArchiveResponse {})
+        ClientResponsePayload::ThreadArchive(Box::new(v2::ThreadArchiveResponse {}))
             .into_jsonrpc_parts_and_payload(RequestId::Integer(7))?;
 
     assert_eq!(request_id, RequestId::Integer(7));
@@ -27,9 +27,9 @@ fn client_response_payload_returns_jsonrpc_parts_and_client_response() -> Result
 #[test]
 fn interrupt_conversation_payload_stays_jsonrpc_only() -> Result<()> {
     let (request_id, result, payload) =
-        ClientResponsePayload::InterruptConversation(v1::InterruptConversationResponse {
+        ClientResponsePayload::InterruptConversation(Box::new(v1::InterruptConversationResponse {
             abort_reason: TurnAbortReason::Interrupted,
-        })
+        }))
         .into_jsonrpc_parts_and_payload(RequestId::Integer(8))?;
 
     assert_eq!(request_id, RequestId::Integer(8));
