@@ -13,7 +13,7 @@ use crate::bottom_pane::SelectionViewParams;
 
 pub(crate) fn build_thread_tree_params(tree: ThreadTree) -> SelectionViewParams {
     let flattened_turns = flattened_turns(&tree);
-    let root_side_branches = side_branches_for_parent(&tree, None);
+    let root_side_branches = side_branches_for_parent(&tree, /*parent_turn_id*/ None);
     let initial_selected_idx = tree.active_leaf_turn_id.as_deref().and_then(|active_id| {
         let mut item_index = root_side_branches.len() + 1;
         for flattened in &flattened_turns {
@@ -123,10 +123,19 @@ struct FlattenedTurn {
 
 fn flattened_turns(tree: &ThreadTree) -> Vec<FlattenedTurn> {
     let mut flattened = Vec::new();
-    let mut stack = ordered_roots(tree)
+    let roots = ordered_roots(tree);
+    let root_side_branch_count = side_branch_count_for_parent(tree, /*parent_turn_id*/ None);
+    let total_root_edges = root_side_branch_count + roots.len();
+    let mut stack = roots
         .into_iter()
+        .enumerate()
         .rev()
-        .map(|index| (index, String::new(), String::new()))
+        .map(|(position, index)| {
+            let edge_position = root_side_branch_count + position;
+            let (row_prefix, child_prefix) =
+                turn_edge_prefixes("", edge_position, total_root_edges);
+            (index, row_prefix, child_prefix)
+        })
         .collect::<Vec<_>>();
     while let Some((index, row_prefix, child_prefix)) = stack.pop() {
         flattened.push(FlattenedTurn {
@@ -136,19 +145,38 @@ fn flattened_turns(tree: &ThreadTree) -> Vec<FlattenedTurn> {
         });
 
         let children = ordered_children(tree, index);
-        let child_count = children.len();
+        let side_branch_count =
+            side_branch_count_for_parent(tree, Some(&tree.turns[index].turn_id));
+        let total_edges = side_branch_count + children.len();
         for (child_position, child_index) in children.into_iter().enumerate().rev() {
-            let is_last = child_position + 1 == child_count;
-            let branch = if is_last { "`- " } else { "|- " };
-            let continuation = if is_last { "   " } else { "|  " };
-            stack.push((
-                child_index,
-                format!("{child_prefix}{branch}"),
-                format!("{child_prefix}{continuation}"),
-            ));
+            let edge_position = side_branch_count + child_position;
+            let (row_prefix, child_prefix) =
+                turn_edge_prefixes(&child_prefix, edge_position, total_edges);
+            stack.push((child_index, row_prefix, child_prefix));
         }
     }
     flattened
+}
+
+fn turn_edge_prefixes(
+    parent_child_prefix: &str,
+    edge_position: usize,
+    total_edges: usize,
+) -> (String, String) {
+    if total_edges <= 1 {
+        return (
+            parent_child_prefix.to_string(),
+            parent_child_prefix.to_string(),
+        );
+    }
+
+    let is_last = edge_position + 1 == total_edges;
+    let branch = if is_last { "`- " } else { "|- " };
+    let continuation = if is_last { "   " } else { "|  " };
+    (
+        format!("{parent_child_prefix}{branch}"),
+        format!("{parent_child_prefix}{continuation}"),
+    )
 }
 
 fn side_branch_item(branch: &ThreadTreeSideBranch, prefix: String) -> SelectionItem {
@@ -172,6 +200,13 @@ fn side_branch_item(branch: &ThreadTreeSideBranch, prefix: String) -> SelectionI
         )),
         ..Default::default()
     }
+}
+
+fn side_branch_count_for_parent(tree: &ThreadTree, parent_turn_id: Option<&str>) -> usize {
+    tree.side_branches
+        .iter()
+        .filter(|branch| branch.parent_turn_id.as_deref() == parent_turn_id)
+        .count()
 }
 
 fn side_branches_for_parent<'a>(
@@ -271,50 +306,102 @@ mod tests {
                 },
             ],
             turns: vec![
-                ThreadTreeTurn {
-                    turn_id: "turn-1".to_string(),
-                    parent_turn_id: None,
-                    children: vec![1, 2],
-                    depth: 0,
-                    user_message: Some("first".to_string()),
-                    counts_as_user_turn: true,
-                    started_at: None,
-                    completed_at: None,
-                    is_active_path: true,
-                    rollout_start_index: 0,
-                    rollout_end_index: 1,
-                },
-                ThreadTreeTurn {
-                    turn_id: "turn-2a".to_string(),
-                    parent_turn_id: Some("turn-1".to_string()),
-                    children: Vec::new(),
-                    depth: 1,
-                    user_message: Some("second A".to_string()),
-                    counts_as_user_turn: true,
-                    started_at: None,
-                    completed_at: None,
-                    is_active_path: false,
-                    rollout_start_index: 1,
-                    rollout_end_index: 2,
-                },
-                ThreadTreeTurn {
-                    turn_id: "turn-3b".to_string(),
-                    parent_turn_id: Some("turn-1".to_string()),
-                    children: Vec::new(),
-                    depth: 1,
-                    user_message: Some("second B".to_string()),
-                    counts_as_user_turn: true,
-                    started_at: None,
-                    completed_at: None,
-                    is_active_path: true,
-                    rollout_start_index: 2,
-                    rollout_end_index: 3,
-                },
+                root_turn("turn-1", vec![1, 2], "first"),
+                inactive(child_turn("turn-2a", "turn-1", Vec::new(), "second A")),
+                child_turn("turn-3b", "turn-1", Vec::new(), "second B"),
             ],
         };
 
+        let rows = render_rows(tree);
+
+        assert_snapshot!(rows);
+    }
+
+    #[test]
+    fn renders_linear_history_without_nested_indentation() {
+        let tree = ThreadTree {
+            active_leaf_turn_id: Some("turn-3".to_string()),
+            roots: vec![0],
+            side_branches: Vec::new(),
+            turns: vec![
+                root_turn("turn-1", vec![1], "first"),
+                child_turn("turn-2", "turn-1", vec![2], "second"),
+                child_turn("turn-3", "turn-2", Vec::new(), "third"),
+            ],
+        };
+
+        assert_snapshot!(render_rows(tree));
+    }
+
+    #[test]
+    fn keeps_linear_descendants_on_their_branch_lane() {
+        let tree = ThreadTree {
+            active_leaf_turn_id: Some("turn-3b".to_string()),
+            roots: vec![0],
+            side_branches: Vec::new(),
+            turns: vec![
+                root_turn("turn-1", vec![1, 2], "first"),
+                inactive(child_turn("turn-2a", "turn-1", Vec::new(), "second A")),
+                child_turn("turn-2b", "turn-1", vec![3], "second B"),
+                child_turn("turn-3b", "turn-2b", Vec::new(), "third B"),
+            ],
+        };
+
+        assert_snapshot!(render_rows(tree));
+    }
+
+    fn root_turn(turn_id: &str, children: Vec<usize>, user_message: &str) -> ThreadTreeTurn {
+        turn_with_parent(
+            turn_id,
+            /*parent_turn_id*/ None,
+            children,
+            user_message,
+        )
+    }
+
+    fn child_turn(
+        turn_id: &str,
+        parent_turn_id: &str,
+        children: Vec<usize>,
+        user_message: &str,
+    ) -> ThreadTreeTurn {
+        turn_with_parent(
+            turn_id,
+            Some(parent_turn_id.to_string()),
+            children,
+            user_message,
+        )
+    }
+
+    fn turn_with_parent(
+        turn_id: &str,
+        parent_turn_id: Option<String>,
+        children: Vec<usize>,
+        user_message: &str,
+    ) -> ThreadTreeTurn {
+        ThreadTreeTurn {
+            turn_id: turn_id.to_string(),
+            parent_turn_id,
+            children,
+            depth: 0,
+            user_message: Some(user_message.to_string()),
+            counts_as_user_turn: true,
+            started_at: None,
+            completed_at: None,
+            is_active_path: true,
+            rollout_start_index: 0,
+            rollout_end_index: 0,
+        }
+    }
+
+    fn inactive(mut turn: ThreadTreeTurn) -> ThreadTreeTurn {
+        turn.is_active_path = false;
+        turn
+    }
+
+    fn render_rows(tree: ThreadTree) -> String {
         let params = build_thread_tree_params(tree);
-        let rows = params
+        params
             .items
             .iter()
             .map(|item| {
@@ -330,9 +417,7 @@ mod tests {
                 )
             })
             .collect::<Vec<_>>()
-            .join("\n");
-
-        assert_snapshot!(rows);
+            .join("\n")
     }
 
     #[test]
