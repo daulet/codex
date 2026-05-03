@@ -3,6 +3,10 @@ use codex_install_context::InstallContext;
 #[cfg(any(not(debug_assertions), test))]
 use codex_install_context::StandalonePlatform;
 
+const FORK_HOMEBREW_FORMULA: &str = "daulet/tap/codex";
+const FORK_RELEASE_NOTES_URL: &str = "https://github.com/daulet/codex/releases/latest";
+const UPSTREAM_RELEASE_NOTES_URL: &str = "https://github.com/openai/codex/releases/latest";
+
 /// Update action the CLI should perform after the TUI exits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UpdateAction {
@@ -10,7 +14,7 @@ pub enum UpdateAction {
     NpmGlobalLatest,
     /// Update via `bun install -g @openai/codex@latest`.
     BunGlobalLatest,
-    /// Update via `brew upgrade codex`.
+    /// Update via `brew upgrade daulet/tap/codex`.
     BrewUpgrade,
     /// Update via `curl -fsSL https://chatgpt.com/codex/install.sh | sh`.
     StandaloneUnix,
@@ -38,7 +42,7 @@ impl UpdateAction {
         match self {
             UpdateAction::NpmGlobalLatest => ("npm", &["install", "-g", "@openai/codex"]),
             UpdateAction::BunGlobalLatest => ("bun", &["install", "-g", "@openai/codex"]),
-            UpdateAction::BrewUpgrade => ("brew", &["upgrade", "--cask", "codex"]),
+            UpdateAction::BrewUpgrade => ("brew", &["upgrade", FORK_HOMEBREW_FORMULA]),
             UpdateAction::StandaloneUnix => (
                 "sh",
                 &["-c", "curl -fsSL https://chatgpt.com/codex/install.sh | sh"],
@@ -55,6 +59,16 @@ impl UpdateAction {
         let (command, args) = self.command_args();
         shlex::try_join(std::iter::once(command).chain(args.iter().copied()))
             .unwrap_or_else(|_| format!("{command} {}", args.join(" ")))
+    }
+
+    pub fn release_notes_url(self) -> &'static str {
+        match self {
+            UpdateAction::BrewUpgrade => FORK_RELEASE_NOTES_URL,
+            UpdateAction::NpmGlobalLatest
+            | UpdateAction::BunGlobalLatest
+            | UpdateAction::StandaloneUnix
+            | UpdateAction::StandaloneWindows => UPSTREAM_RELEASE_NOTES_URL,
+        }
     }
 }
 
@@ -122,6 +136,22 @@ mod tests {
                 "powershell",
                 &["-c", "irm https://chatgpt.com/codex/install.ps1|iex"][..],
             )
+        );
+    }
+
+    #[test]
+    fn brew_update_command_uses_fork_formula() {
+        assert_eq!(
+            UpdateAction::BrewUpgrade.command_args(),
+            ("brew", &["upgrade", "daulet/tap/codex"][..])
+        );
+        assert_eq!(
+            UpdateAction::BrewUpgrade.command_str(),
+            "brew upgrade daulet/tap/codex"
+        );
+        assert_eq!(
+            UpdateAction::BrewUpgrade.release_notes_url(),
+            "https://github.com/daulet/codex/releases/latest"
         );
     }
 }
