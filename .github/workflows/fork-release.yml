@@ -2,9 +2,14 @@ name: fork-release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*.*.*"
       - "codex-v*.*.*"
+  release:
+    types:
+      - published
   workflow_dispatch:
     inputs:
       release_tag:
@@ -26,27 +31,94 @@ jobs:
     name: Release metadata
     runs-on: ubuntu-latest
     outputs:
+      should_release: ${{ steps.metadata.outputs.should_release }}
       version: ${{ steps.metadata.outputs.version }}
       deb_version: ${{ steps.metadata.outputs.deb_version }}
       release_tag: ${{ steps.metadata.outputs.release_tag }}
       repo: ${{ steps.metadata.outputs.repo }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        with:
+          fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@a0b273b48ed29de4470960879e8381ff45632f26 # 1.93.0
 
       - id: metadata
         name: Resolve release metadata
         shell: bash
         env:
           REQUESTED_RELEASE_TAG: ${{ github.event.inputs.release_tag || '' }}
+          PUBLISHED_RELEASE_TAG: ${{ github.event.release.tag_name || '' }}
         run: |
           set -euo pipefail
 
           cargo_version="$(sed -n 's/^version = "\(.*\)"/\1/p' codex-rs/Cargo.toml | head -n 1)"
           release_tag="$REQUESTED_RELEASE_TAG"
+          should_release="true"
+
+          if [[ -z "$release_tag" && "$GITHUB_EVENT_NAME" == "release" ]]; then
+            release_tag="$PUBLISHED_RELEASE_TAG"
+          fi
 
           if [[ -z "$release_tag" && "$GITHUB_REF_TYPE" == "tag" ]]; then
             release_tag="$GITHUB_REF_NAME"
           fi
+
+          if [[ "$GITHUB_EVENT_NAME" == "release" && ! "$release_tag" =~ ^(v|codex-v)[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+            {
+              echo "should_release=false"
+              echo "repo=$GITHUB_REPOSITORY"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [[ -z "$release_tag" && "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF_TYPE" == "branch" ]]; then
+            git fetch --tags --force origin '+refs/tags/v*:refs/tags/v*'
+
+            plan="$(scripts/release/next-fork-release.py)"
+            while IFS='=' read -r key value; do
+              case "$key" in
+                should_release) should_release="$value" ;;
+                version) version="$value" ;;
+                release_tag) release_tag="$value" ;;
+                previous_tag) previous_tag="$value" ;;
+                bump) bump="$value" ;;
+              esac
+            done <<< "$plan"
+
+            if [[ "$should_release" != "true" ]]; then
+              {
+                echo "should_release=false"
+                echo "version=${version:-$cargo_version}"
+                echo "release_tag=${release_tag:-v$cargo_version}"
+                echo "repo=$GITHUB_REPOSITORY"
+              } >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "Preparing fork release ${release_tag} (${bump:-unknown} from ${previous_tag:-workspace version})."
+
+            if git rev-parse -q --verify "refs/tags/${release_tag}" >/dev/null; then
+              echo "Release tag ${release_tag} already exists." >&2
+              exit 1
+            fi
+
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+            if [[ "$version" != "$cargo_version" ]]; then
+              scripts/release/set-workspace-version.py --version "$version"
+              (cd codex-rs && cargo metadata --format-version=1 >/dev/null)
+
+              git add codex-rs/Cargo.toml codex-rs/Cargo.lock
+              git commit -m "chore(release): ${release_tag} [skip ci]"
+              git push origin "HEAD:${GITHUB_REF_NAME}"
+            fi
+
+            git tag -a "$release_tag" -m "Release ${version}"
+            git push origin "$release_tag"
+          fi
+
           if [[ -z "$release_tag" ]]; then
             release_tag="v${cargo_version}"
           fi
@@ -65,6 +137,7 @@ jobs:
           deb_version="${version//-/~}"
 
           {
+            echo "should_release=$should_release"
             echo "version=$version"
             echo "deb_version=$deb_version"
             echo "release_tag=$release_tag"
@@ -74,6 +147,7 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     needs: metadata
+    if: needs.metadata.outputs.should_release == 'true'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     env:
@@ -167,6 +241,7 @@ jobs:
     needs:
       - metadata
       - build
+    if: needs.metadata.outputs.should_release == 'true'
     runs-on: ubuntu-latest
     outputs:
       version: ${{ needs.metadata.outputs.version }}
@@ -206,6 +281,7 @@ jobs:
   update-homebrew-tap:
     name: Update Homebrew tap
     needs: release
+    if: needs.release.outputs.release_tag != ''
     runs-on: ubuntu-latest
     env:
       TAP_REPOSITORY: ${{ vars.HOMEBREW_TAP_REPOSITORY || 'daulet/homebrew-tap' }}
@@ -280,6 +356,7 @@ jobs:
   update-apt-repo:
     name: Update APT repository
     needs: release
+    if: needs.release.outputs.release_tag != ''
     runs-on: ubuntu-latest
     env:
       PACKAGES_REPOSITORY: ${{ vars.PACKAGES_REPOSITORY || 'daulet/packages' }}
@@ -298,7 +375,7 @@ jobs:
             echo "::notice title=APT repository update skipped::Set PACKAGES_REPO_TOKEN with contents write access to $PACKAGES_REPOSITORY."
           fi
 
-      - uses: actions/download-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         if: steps.packages_token.outputs.available == 'true'
         with:
           pattern: release-*
