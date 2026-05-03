@@ -276,3 +276,103 @@ jobs:
           git add Formula/codex.rb
           git commit -m "Update codex to ${{ needs.release.outputs.version }}"
           git push
+
+  update-apt-repo:
+    name: Update APT repository
+    needs: release
+    runs-on: ubuntu-latest
+    env:
+      PACKAGES_REPOSITORY: ${{ vars.PACKAGES_REPOSITORY || 'daulet/packages' }}
+      PACKAGES_REPO_TOKEN: ${{ secrets.PACKAGES_REPO_TOKEN || secrets.TAP_GITHUB_TOKEN || secrets.HOMEBREW_TAP_TOKEN }}
+      PACKAGE_RELEASE_TAG: codex-${{ needs.release.outputs.release_tag }}
+    steps:
+      - name: Check packages token
+        id: packages_token
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "$PACKAGES_REPO_TOKEN" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=APT repository update skipped::Set PACKAGES_REPO_TOKEN with contents write access to $PACKAGES_REPOSITORY."
+          fi
+
+      - uses: actions/download-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7
+        if: steps.packages_token.outputs.available == 'true'
+        with:
+          pattern: release-*
+          merge-multiple: true
+          path: dist
+
+      - name: Resolve Debian package assets
+        if: steps.packages_token.outputs.available == 'true'
+        id: debs
+        shell: bash
+        run: |
+          set -euo pipefail
+          amd64_deb="$(find dist -maxdepth 1 -type f -name '*.deb' | grep -E '[_-]amd64\.deb$' | sort | head -n1)"
+          arm64_deb="$(find dist -maxdepth 1 -type f -name '*.deb' | grep -E '[_-]arm64\.deb$' | sort | head -n1)"
+
+          if [[ -z "$amd64_deb" || -z "$arm64_deb" ]]; then
+            echo "Failed to locate amd64 and arm64 .deb artifacts in dist" >&2
+            ls -la dist >&2
+            exit 1
+          fi
+
+          {
+            echo "amd64_name=$(basename "$amd64_deb")"
+            echo "amd64_sha=$(sha256sum "$amd64_deb" | awk '{print $1}')"
+            echo "arm64_name=$(basename "$arm64_deb")"
+            echo "arm64_sha=$(sha256sum "$arm64_deb" | awk '{print $1}')"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish Debian packages to packages repository release
+        if: steps.packages_token.outputs.available == 'true'
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
+        with:
+          repository: ${{ env.PACKAGES_REPOSITORY }}
+          token: ${{ env.PACKAGES_REPO_TOKEN }}
+          tag_name: ${{ env.PACKAGE_RELEASE_TAG }}
+          name: Codex ${{ needs.release.outputs.release_tag }} Debian packages
+          files: dist/*.deb
+          overwrite_files: true
+
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+        if: steps.packages_token.outputs.available == 'true'
+        with:
+          repository: ${{ env.PACKAGES_REPOSITORY }}
+          token: ${{ env.PACKAGES_REPO_TOKEN }}
+          path: packages
+
+      - name: Update packages manifest
+        if: steps.packages_token.outputs.available == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 packages/scripts/update-package.py \
+            --manifest packages/packages.json \
+            --name codex \
+            --repo "$PACKAGES_REPOSITORY" \
+            --tag "$PACKAGE_RELEASE_TAG" \
+            --version "${{ needs.release.outputs.version }}" \
+            --asset "amd64:${{ steps.debs.outputs.amd64_name }}:${{ steps.debs.outputs.amd64_sha }}" \
+            --asset "arm64:${{ steps.debs.outputs.arm64_name }}:${{ steps.debs.outputs.arm64_sha }}"
+
+      - name: Commit and push packages manifest
+        if: steps.packages_token.outputs.available == 'true'
+        shell: bash
+        working-directory: packages
+        run: |
+          set -euo pipefail
+          if [[ -z "$(git status --short -- packages.json)" ]]; then
+            echo "APT package manifest already up to date."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages.json
+          git commit -m "codex ${{ needs.release.outputs.version }}"
+          git pull --rebase origin main
+          git push origin HEAD:main
