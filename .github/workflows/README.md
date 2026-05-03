@@ -26,6 +26,10 @@ The workflows in this directory are split so that pull requests get fast, review
   - release-profile Cargo builds
   - cross-platform `argument-comment-lint`
   - Linux remote-env tests
+- `fork-release.yml` publishes fork releases from pushes to `main`.
+  It uses release-please-style commit conventions for the version bump, treats
+  non-matching commits as patch releases, builds the release artifacts, and
+  updates the Homebrew tap.
 
 ## Rule Of Thumb
 

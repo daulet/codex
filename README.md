@@ -30,7 +30,7 @@ cargo build --release --bin codex
 - Persistent `/side` conversations: side discussions are saved as real conversation branches instead of temporary scratch sessions.
 - Branch-aware `/tree`: the tree view shows side discussions alongside normal conversation branches and can resume them.
 - Branch persistence metadata: side branches keep parent thread and parent turn linkage so conversation history is no longer modeled as one flat prompt/response list.
-- Fork release automation: GitHub Actions builds macOS and Debian artifacts, publishes GitHub Releases, and updates `daulet/tap/codex`.
+- Fork release automation: GitHub Actions releases each new `main` commit, builds macOS and Debian artifacts, publishes GitHub Releases, and updates `daulet/tap/codex`.
 
 ## Upstream Codex
 
