@@ -204,9 +204,7 @@ impl WidgetRef for &UpdatePromptScreen {
         column.push(
             Line::from(vec![
                 "Release notes: ".dim(),
-                "https://github.com/openai/codex/releases/latest"
-                    .dim()
-                    .underlined(),
+                self.update_action.release_notes_url().dim().underlined(),
             ])
             .inset(Insets::tlbr(0, 2, 0, 0)),
         );

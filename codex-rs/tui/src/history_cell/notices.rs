@@ -43,7 +43,9 @@ impl HistoryCell for UpdateAvailableHistoryCell {
             update_instruction,
             "",
             "See full release notes:",
-            "https://github.com/openai/codex/releases/latest"
+            self.update_action
+                .map(UpdateAction::release_notes_url)
+                .unwrap_or("https://github.com/openai/codex/releases/latest")
                 .cyan()
                 .underlined(),
         ];
