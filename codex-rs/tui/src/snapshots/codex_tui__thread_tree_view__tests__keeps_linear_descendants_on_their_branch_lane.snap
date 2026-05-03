@@ -1,0 +1,9 @@
+---
+source: tui/src/thread_tree_view.rs
+expression: render_rows(tree)
+---
+root -- Before the first user turn
+first -- turn turn-1 - 2 branches - active path
+|- second B -- turn turn-2b - active path
+|  third B -- turn turn-3b - active path
+`- second A -- turn turn-2a
