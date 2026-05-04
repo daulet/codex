@@ -12,7 +12,10 @@ from pathlib import Path
 
 
 SEMVER_RE = re.compile(r"^(?P<major>0|[1-9]\d*)\.(?P<minor>0|[1-9]\d*)\.(?P<patch>0|[1-9]\d*)$")
-TAG_RE = re.compile(r"^v(?P<version>(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*))$")
+TAG_PREFIX = "rust-v"
+TAG_RE = re.compile(
+    r"^(?:rust-v|v)(?P<version>(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*))$"
+)
 CONVENTIONAL_RE = re.compile(
     r"^(?P<type>[A-Za-z][A-Za-z0-9-]*)(?:\([^)]+\))?(?P<breaking>!)?: .+$"
 )
@@ -67,7 +70,10 @@ def cargo_version(manifest_path: Path) -> Version:
 
 
 def release_tags() -> list[ReleaseTag]:
-    tags = git(["tag", "--list", "v[0-9]*.[0-9]*.[0-9]*"]).splitlines()
+    tags = (
+        git(["tag", "--list", "v[0-9]*.[0-9]*.[0-9]*"]).splitlines()
+        + git(["tag", "--list", "rust-v[0-9]*.[0-9]*.[0-9]*"]).splitlines()
+    )
     release_tags: list[ReleaseTag] = []
     for tag in tags:
         match = TAG_RE.match(tag)
@@ -138,7 +144,7 @@ def main() -> int:
         print_output(
             should_release="true",
             version=str(current_version),
-            release_tag=f"v{current_version}",
+            release_tag=f"{TAG_PREFIX}{current_version}",
             previous_tag=latest.tag if latest else "",
             bump="patch",
         )
@@ -160,7 +166,7 @@ def main() -> int:
     print_output(
         should_release="true",
         version=str(next_version),
-        release_tag=f"v{next_version}",
+        release_tag=f"{TAG_PREFIX}{next_version}",
         previous_tag=latest.tag,
         bump=bump,
     )
