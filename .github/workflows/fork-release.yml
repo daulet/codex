@@ -6,6 +6,7 @@ on:
       - main
     tags:
       - "v*.*.*"
+      - "rust-v*.*.*"
       - "codex-v*.*.*"
   release:
     types:
@@ -13,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Release tag to publish. Defaults to v<Cargo.toml version>."
+        description: "Release tag to publish. Defaults to rust-v<Cargo.toml version>."
         required: false
 
 concurrency:
@@ -64,7 +65,7 @@ jobs:
             release_tag="$GITHUB_REF_NAME"
           fi
 
-          if [[ "$GITHUB_EVENT_NAME" == "release" && ! "$release_tag" =~ ^(v|codex-v)[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "release" && ! "$release_tag" =~ ^(v|rust-v|codex-v)[0-9]+\.[0-9]+\.[0-9]+ ]]; then
             {
               echo "should_release=false"
               echo "repo=$GITHUB_REPOSITORY"
@@ -73,7 +74,7 @@ jobs:
           fi
 
           if [[ -z "$release_tag" && "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF_TYPE" == "branch" ]]; then
-            git fetch --tags --force origin '+refs/tags/v*:refs/tags/v*'
+            git fetch --tags --force origin '+refs/tags/v*:refs/tags/v*' '+refs/tags/rust-v*:refs/tags/rust-v*'
 
             plan="$(scripts/release/next-fork-release.py)"
             while IFS='=' read -r key value; do
@@ -90,7 +91,7 @@ jobs:
               {
                 echo "should_release=false"
                 echo "version=${version:-$cargo_version}"
-                echo "release_tag=${release_tag:-v$cargo_version}"
+                echo "release_tag=${release_tag:-rust-v$cargo_version}"
                 echo "repo=$GITHUB_REPOSITORY"
               } >> "$GITHUB_OUTPUT"
               exit 0
@@ -120,7 +121,7 @@ jobs:
           fi
 
           if [[ -z "$release_tag" ]]; then
-            release_tag="v${cargo_version}"
+            release_tag="rust-v${cargo_version}"
           fi
 
           version="$release_tag"
