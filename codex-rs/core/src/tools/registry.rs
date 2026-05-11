@@ -276,8 +276,15 @@ impl ToolRegistry {
         let call_id_owned = invocation.call_id.clone();
         let otel = invocation.turn.session_telemetry.clone();
         let payload_for_response = invocation.payload.clone();
+        let reasoning_effort = invocation
+            .turn
+            .reasoning_effort
+            .map(|effort| effort.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let reasoning_effort_ref = Some(reasoning_effort.as_str());
         let log_payload = payload_for_response.log_payload();
         let metric_tags = [
+            ("reasoning_effort", reasoning_effort.as_str()),
             (
                 "sandbox",
                 permission_profile_sandbox_tag(
@@ -324,7 +331,7 @@ impl ToolRegistry {
             Some(handler) => handler,
             None => {
                 let message = unsupported_tool_call_message(&invocation.payload, &tool_name);
-                otel.tool_result_with_tags(
+                otel.tool_result_with_tags_and_usage(
                     &display_name,
                     &call_id_owned,
                     log_payload.as_ref(),
@@ -334,6 +341,8 @@ impl ToolRegistry {
                     &metric_tags,
                     mcp_server_ref,
                     mcp_server_origin_ref,
+                    reasoning_effort_ref,
+                    Default::default(),
                 );
                 let err = FunctionCallError::RespondToModel(message);
                 dispatch_trace.record_failed(&err);
@@ -343,7 +352,7 @@ impl ToolRegistry {
 
         if !handler.matches_kind(&invocation.payload) {
             let message = format!("tool {display_name} invoked with incompatible payload");
-            otel.tool_result_with_tags(
+            otel.tool_result_with_tags_and_usage(
                 &display_name,
                 &call_id_owned,
                 log_payload.as_ref(),
@@ -353,6 +362,8 @@ impl ToolRegistry {
                 &metric_tags,
                 mcp_server_ref,
                 mcp_server_origin_ref,
+                reasoning_effort_ref,
+                Default::default(),
             );
             let err = FunctionCallError::Fatal(message);
             dispatch_trace.record_failed(&err);
@@ -380,15 +391,17 @@ impl ToolRegistry {
 
         let started = Instant::now();
         let result = otel
-            .log_tool_result_with_tags(
+            .log_tool_result_with_tags_and_usage(
                 &display_name,
                 &call_id_owned,
                 log_payload.as_ref(),
                 &metric_tags,
                 mcp_server_ref,
                 mcp_server_origin_ref,
+                reasoning_effort_ref,
                 || {
                     let handler = handler.clone();
+                    let payload_for_usage = payload_for_response.clone();
                     let response_cell = &response_cell;
                     async move {
                         if is_mutating {
@@ -400,9 +413,10 @@ impl ToolRegistry {
                             Ok(result) => {
                                 let preview = result.result.log_preview();
                                 let success = result.result.success_for_logging();
+                                let usage = result.result.telemetry_usage(&payload_for_usage);
                                 let mut guard = response_cell.lock().await;
                                 *guard = Some(result);
-                                Ok((preview, success))
+                                Ok((preview, success, usage))
                             }
                             Err(err) => Err(err),
                         }
@@ -412,7 +426,7 @@ impl ToolRegistry {
             .await;
         let duration = started.elapsed();
         let (output_preview, success) = match &result {
-            Ok((preview, success)) => (preview.clone(), *success),
+            Ok((preview, success, _usage)) => (preview.clone(), *success),
             Err(err) => (err.to_string(), false),
         };
         emit_metric_for_tool_read(&invocation, success).await;

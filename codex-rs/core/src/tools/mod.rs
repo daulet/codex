@@ -16,6 +16,7 @@ pub(crate) mod spec_plan;
 pub(crate) mod spec_plan_types;
 pub(crate) mod tool_dispatch_trace;
 pub(crate) mod tool_search_entry;
+pub(crate) mod usage;
 
 use codex_protocol::exec_output::ExecToolCallOutput;
 use codex_utils_output_truncation::TruncationPolicy;

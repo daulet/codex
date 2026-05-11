@@ -5,8 +5,13 @@ use crate::session::turn_context::TurnContext;
 use crate::tools::TELEMETRY_PREVIEW_MAX_BYTES;
 use crate::tools::TELEMETRY_PREVIEW_MAX_LINES;
 use crate::tools::TELEMETRY_PREVIEW_TRUNCATION_NOTICE;
+use crate::tools::usage::merge_usage;
+use crate::tools::usage::model_read_usage_for_content_items;
+use crate::tools::usage::model_read_usage_for_payload;
+use crate::tools::usage::model_read_usage_for_text;
 use crate::turn_diff_tracker::TurnDiffTracker;
 use crate::unified_exec::resolve_max_tokens;
+use codex_otel::ToolUsage;
 use codex_protocol::mcp::CallToolResult;
 use codex_protocol::models::DEFAULT_IMAGE_DETAIL;
 use codex_protocol::models::FunctionCallOutputBody;
@@ -110,6 +115,10 @@ pub trait ToolOutput: Send {
     fn code_mode_result(&self, payload: &ToolPayload) -> JsonValue {
         response_input_to_code_mode_result(self.to_response_item("", payload))
     }
+
+    fn telemetry_usage(&self, _payload: &ToolPayload) -> ToolUsage {
+        ToolUsage::default()
+    }
 }
 
 impl ToolOutput for CallToolResult {
@@ -134,6 +143,11 @@ impl ToolOutput for CallToolResult {
         serde_json::to_value(self).unwrap_or_else(|err| {
             JsonValue::String(format!("failed to serialize mcp result: {err}"))
         })
+    }
+
+    fn telemetry_usage(&self, _payload: &ToolPayload) -> ToolUsage {
+        let payload = self.as_function_call_output_payload();
+        model_read_usage_for_payload(&payload)
     }
 }
 
@@ -175,6 +189,11 @@ impl ToolOutput for McpToolOutput {
 
     fn post_tool_use_response(&self, _call_id: &str, _payload: &ToolPayload) -> Option<JsonValue> {
         serde_json::to_value(&self.result).ok()
+    }
+
+    fn telemetry_usage(&self, _payload: &ToolPayload) -> ToolUsage {
+        let payload = self.response_payload();
+        model_read_usage_for_payload(&payload)
     }
 }
 
@@ -256,6 +275,7 @@ pub struct FunctionToolOutput {
     pub body: Vec<FunctionCallOutputContentItem>,
     pub success: Option<bool>,
     pub post_tool_use_response: Option<JsonValue>,
+    pub telemetry_usage: ToolUsage,
 }
 
 impl FunctionToolOutput {
@@ -264,6 +284,7 @@ impl FunctionToolOutput {
             body: vec![FunctionCallOutputContentItem::InputText { text }],
             success,
             post_tool_use_response: None,
+            telemetry_usage: ToolUsage::default(),
         }
     }
 
@@ -275,11 +296,17 @@ impl FunctionToolOutput {
             body: content,
             success,
             post_tool_use_response: None,
+            telemetry_usage: ToolUsage::default(),
         }
     }
 
     pub fn into_text(self) -> String {
         function_call_output_content_items_to_text(&self.body).unwrap_or_default()
+    }
+
+    pub fn with_telemetry_usage(mut self, telemetry_usage: ToolUsage) -> Self {
+        self.telemetry_usage = telemetry_usage;
+        self
     }
 }
 
@@ -301,15 +328,31 @@ impl ToolOutput for FunctionToolOutput {
     fn post_tool_use_response(&self, _call_id: &str, _payload: &ToolPayload) -> Option<JsonValue> {
         self.post_tool_use_response.clone()
     }
+
+    fn telemetry_usage(&self, _payload: &ToolPayload) -> ToolUsage {
+        let model_read_usage = model_read_usage_for_content_items(&self.body);
+        merge_usage(model_read_usage, self.telemetry_usage)
+    }
 }
 
 pub struct ApplyPatchToolOutput {
     pub text: String,
+    pub telemetry_usage: ToolUsage,
 }
 
 impl ApplyPatchToolOutput {
     pub fn from_text(text: String) -> Self {
-        Self { text }
+        Self {
+            text,
+            telemetry_usage: ToolUsage::default(),
+        }
+    }
+
+    pub fn from_text_with_usage(text: String, telemetry_usage: ToolUsage) -> Self {
+        Self {
+            text,
+            telemetry_usage,
+        }
     }
 }
 
@@ -339,6 +382,11 @@ impl ToolOutput for ApplyPatchToolOutput {
 
     fn code_mode_result(&self, _payload: &ToolPayload) -> JsonValue {
         JsonValue::Object(serde_json::Map::new())
+    }
+
+    fn telemetry_usage(&self, _payload: &ToolPayload) -> ToolUsage {
+        let model_read_usage = model_read_usage_for_text(&self.text);
+        merge_usage(model_read_usage, self.telemetry_usage)
     }
 }
 
@@ -376,6 +424,10 @@ impl ToolOutput for AbortedToolOutput {
                 /*success*/ None,
             ),
         }
+    }
+
+    fn telemetry_usage(&self, _payload: &ToolPayload) -> ToolUsage {
+        model_read_usage_for_text(&self.message)
     }
 }
 
@@ -448,6 +500,10 @@ impl ToolOutput for ExecCommandToolOutput {
         serde_json::to_value(result).unwrap_or_else(|err| {
             JsonValue::String(format!("failed to serialize exec result: {err}"))
         })
+    }
+
+    fn telemetry_usage(&self, _payload: &ToolPayload) -> ToolUsage {
+        model_read_usage_for_text(&self.response_text())
     }
 }
 

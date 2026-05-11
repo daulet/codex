@@ -35,6 +35,7 @@ use crate::tools::registry::ToolKind;
 use crate::tools::runtimes::apply_patch::ApplyPatchRequest;
 use crate::tools::runtimes::apply_patch::ApplyPatchRuntime;
 use crate::tools::sandboxing::ToolCtx;
+use crate::tools::usage::file_edit_usage_for_changes;
 use codex_apply_patch::ApplyPatchAction;
 use codex_apply_patch::ApplyPatchFileChange;
 use codex_apply_patch::Hunk;
@@ -427,6 +428,7 @@ impl ToolHandler for ApplyPatchHandler {
                     }
                     InternalApplyPatchInvocation::DelegateToRuntime(apply) => {
                         let changes = convert_apply_patch_to_protocol(&apply.action);
+                        let telemetry_usage = file_edit_usage_for_changes(&changes);
                         let emitter =
                             ToolEmitter::apply_patch(changes.clone(), apply.auto_approved);
                         let event_ctx = ToolEventCtx::new(
@@ -477,7 +479,10 @@ impl ToolHandler for ApplyPatchHandler {
                             Some(&tracker),
                         );
                         let content = emitter.finish(event_ctx, out, delta.as_ref()).await?;
-                        Ok(ApplyPatchToolOutput::from_text(content))
+                        Ok(ApplyPatchToolOutput::from_text_with_usage(
+                            content,
+                            telemetry_usage,
+                        ))
                     }
                 }
             }
@@ -540,6 +545,7 @@ pub(crate) async fn intercept_apply_patch(
                 }
                 InternalApplyPatchInvocation::DelegateToRuntime(apply) => {
                     let changes = convert_apply_patch_to_protocol(&apply.action);
+                    let telemetry_usage = file_edit_usage_for_changes(&changes);
                     let emitter = ToolEmitter::apply_patch(changes.clone(), apply.auto_approved);
                     let event_ctx = ToolEventCtx::new(
                         session.as_ref(),
@@ -589,7 +595,10 @@ pub(crate) async fn intercept_apply_patch(
                         tracker.as_ref().copied(),
                     );
                     let content = emitter.finish(event_ctx, out, delta.as_ref()).await?;
-                    Ok(Some(FunctionToolOutput::from_text(content, Some(true))))
+                    Ok(Some(
+                        FunctionToolOutput::from_text(content, Some(true))
+                            .with_telemetry_usage(telemetry_usage),
+                    ))
                 }
             }
         }
