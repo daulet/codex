@@ -3,10 +3,12 @@ use codex_protocol::models::FunctionCallOutputBody;
 use codex_protocol::models::FunctionCallOutputContentItem;
 use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ResponseInputItem;
+use codex_protocol::models::function_call_output_content_items_to_text;
 use codex_utils_string::take_bytes_at_char_boundary;
 use serde_json::Value as JsonValue;
 
 use crate::ToolPayload;
+use codex_otel::ToolUsage;
 
 const TELEMETRY_PREVIEW_MAX_BYTES: usize = 2 * 1024;
 const TELEMETRY_PREVIEW_MAX_LINES: usize = 64;
@@ -44,6 +46,10 @@ pub trait ToolOutput: Send {
     fn code_mode_result(&self, payload: &ToolPayload) -> JsonValue {
         response_input_to_code_mode_result(self.to_response_item("", payload))
     }
+
+    fn telemetry_usage(&self, _payload: &ToolPayload) -> ToolUsage {
+        ToolUsage::default()
+    }
 }
 
 impl<T> ToolOutput for Box<T>
@@ -76,6 +82,10 @@ where
 
     fn code_mode_result(&self, payload: &ToolPayload) -> JsonValue {
         (**self).code_mode_result(payload)
+    }
+
+    fn telemetry_usage(&self, payload: &ToolPayload) -> ToolUsage {
+        (**self).telemetry_usage(payload)
     }
 }
 
@@ -159,6 +169,29 @@ impl ToolOutput for codex_protocol::mcp::CallToolResult {
             JsonValue::String(format!("failed to serialize mcp result: {err}"))
         })
     }
+
+    fn telemetry_usage(&self, _payload: &ToolPayload) -> ToolUsage {
+        model_read_usage_for_payload(&self.as_function_call_output_payload())
+    }
+}
+
+fn model_read_usage_for_payload(payload: &FunctionCallOutputPayload) -> ToolUsage {
+    let line_count = match &payload.body {
+        FunctionCallOutputBody::Text(text) => line_count(text),
+        FunctionCallOutputBody::ContentItems(items) => {
+            function_call_output_content_items_to_text(items)
+                .map(|text| line_count(&text))
+                .unwrap_or_default()
+        }
+    };
+    ToolUsage {
+        model_read_line_count: Some(line_count),
+        ..Default::default()
+    }
+}
+
+fn line_count(text: &str) -> i64 {
+    i64::try_from(text.lines().count()).unwrap_or(i64::MAX)
 }
 
 fn response_input_to_code_mode_result(response: ResponseInputItem) -> JsonValue {

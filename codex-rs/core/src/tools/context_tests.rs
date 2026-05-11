@@ -1,4 +1,5 @@
 use super::*;
+use codex_otel::ToolUsage;
 use codex_protocol::models::DEFAULT_IMAGE_DETAIL;
 use codex_protocol::models::SearchToolCallParams;
 use core_test_support::assert_regex_match;
@@ -43,6 +44,26 @@ fn function_payloads_remain_function_outputs() {
         }
         other => panic!("expected FunctionCallOutput, got {other:?}"),
     }
+}
+
+#[test]
+fn function_tool_output_telemetry_usage_counts_model_read_lines() {
+    let output = FunctionToolOutput::from_text("one\ntwo\n".to_string(), Some(true))
+        .with_telemetry_usage(ToolUsage {
+            file_edit_line_count: Some(7),
+            ..Default::default()
+        });
+
+    assert_eq!(
+        output.telemetry_usage(&ToolPayload::Function {
+            arguments: "{}".to_string(),
+        }),
+        ToolUsage {
+            model_read_line_count: Some(2),
+            file_edit_line_count: Some(7),
+            ..Default::default()
+        }
+    );
 }
 
 #[test]

@@ -2,6 +2,7 @@ use codex_otel::AuthEnvTelemetryMetadata;
 use codex_otel::OtelProvider;
 use codex_otel::SessionTelemetry;
 use codex_otel::TelemetryAuthMode;
+use codex_otel::ToolUsage;
 use opentelemetry::KeyValue;
 use opentelemetry::logs::AnyValue;
 use opentelemetry::trace::TracerProvider as _;
@@ -243,7 +244,7 @@ fn otel_export_routing_policy_routes_tool_result_log_and_trace_events() {
         );
         let root_span = tracing::info_span!("root");
         let _root_guard = root_span.enter();
-        manager.tool_result_with_tags(
+        manager.tool_result_with_tags_and_usage(
             "shell",
             "call-1",
             "secret arguments",
@@ -255,6 +256,14 @@ fn otel_export_routing_policy_routes_tool_result_log_and_trace_events() {
                 ("mcp_server", "internal-mcp"),
                 ("mcp_server_origin", "stdio"),
             ],
+            Some("high"),
+            ToolUsage {
+                model_read_line_count: Some(2),
+                file_edit_line_count: Some(3),
+                file_edit_added_line_count: Some(2),
+                file_edit_deleted_line_count: Some(1),
+                file_edit_file_count: Some(1),
+            },
         );
     });
 
@@ -285,6 +294,10 @@ fn otel_export_routing_policy_routes_tool_result_log_and_trace_events() {
         tool_log_attrs.get("mcp_server_origin").map(String::as_str),
         Some("stdio")
     );
+    assert_eq!(
+        tool_log_attrs.get("reasoning_effort").map(String::as_str),
+        Some("high")
+    );
 
     let spans = span_exporter.get_finished_spans().expect("span export");
     assert_eq!(spans.len(), 1);
@@ -306,6 +319,40 @@ fn otel_export_routing_policy_routes_tool_result_log_and_trace_events() {
             .get("output_line_count")
             .map(String::as_str),
         Some("2")
+    );
+    assert_eq!(
+        tool_trace_attrs
+            .get("model_read_line_count")
+            .map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        tool_trace_attrs
+            .get("file_edit_line_count")
+            .map(String::as_str),
+        Some("3")
+    );
+    assert_eq!(
+        tool_trace_attrs
+            .get("file_edit_added_line_count")
+            .map(String::as_str),
+        Some("2")
+    );
+    assert_eq!(
+        tool_trace_attrs
+            .get("file_edit_deleted_line_count")
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        tool_trace_attrs
+            .get("file_edit_file_count")
+            .map(String::as_str),
+        Some("1")
+    );
+    assert_eq!(
+        tool_trace_attrs.get("reasoning_effort").map(String::as_str),
+        Some("high")
     );
     assert!(!tool_trace_attrs.contains_key("arguments"));
     assert!(!tool_trace_attrs.contains_key("output"));

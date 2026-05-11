@@ -23,6 +23,11 @@ use crate::metrics::STARTUP_PHASE_DURATION_METRIC;
 use crate::metrics::SessionMetricTagValues;
 use crate::metrics::TOOL_CALL_COUNT_METRIC;
 use crate::metrics::TOOL_CALL_DURATION_METRIC;
+use crate::metrics::TOOL_FILE_EDIT_ADDED_LINES_METRIC;
+use crate::metrics::TOOL_FILE_EDIT_DELETED_LINES_METRIC;
+use crate::metrics::TOOL_FILE_EDIT_FILES_METRIC;
+use crate::metrics::TOOL_FILE_EDIT_LINES_METRIC;
+use crate::metrics::TOOL_MODEL_READ_LINES_METRIC;
 use crate::metrics::TURN_TTFT_DURATION_METRIC;
 use crate::metrics::WEBSOCKET_EVENT_COUNT_METRIC;
 use crate::metrics::WEBSOCKET_EVENT_DURATION_METRIC;
@@ -97,6 +102,20 @@ pub struct SessionTelemetryMetadata {
     pub(crate) log_user_prompts: bool,
     pub(crate) app_version: &'static str,
     pub(crate) terminal_type: String,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ToolUsage {
+    /// Lines returned to the model by the tool response.
+    pub model_read_line_count: Option<i64>,
+    /// Total changed file lines, counted as added plus deleted lines.
+    pub file_edit_line_count: Option<i64>,
+    /// Lines added by structured file edits.
+    pub file_edit_added_line_count: Option<i64>,
+    /// Lines deleted by structured file edits.
+    pub file_edit_deleted_line_count: Option<i64>,
+    /// Files touched by structured file edits.
+    pub file_edit_file_count: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
@@ -1013,16 +1032,48 @@ impl SessionTelemetry {
         Fut: Future<Output = Result<(String, bool), E>>,
         E: std::fmt::Display,
     {
+        self.log_tool_result_with_tags_and_usage(
+            tool_name,
+            call_id,
+            arguments,
+            extra_tags,
+            extra_trace_fields,
+            /*reasoning_effort*/ None,
+            move || async move {
+                f().await
+                    .map(|(preview, success)| (preview, success, ToolUsage::default()))
+            },
+        )
+        .await
+        .map(|(preview, success, _usage)| (preview, success))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn log_tool_result_with_tags_and_usage<F, Fut, E>(
+        &self,
+        tool_name: &str,
+        call_id: &str,
+        arguments: &str,
+        extra_tags: &[(&str, &str)],
+        extra_trace_fields: &[(&str, &str)],
+        reasoning_effort: Option<&str>,
+        f: F,
+    ) -> Result<(String, bool, ToolUsage), E>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<(String, bool, ToolUsage), E>>,
+        E: std::fmt::Display,
+    {
         let start = Instant::now();
         let result = f().await;
         let duration = start.elapsed();
 
-        let (output, success) = match &result {
-            Ok((preview, success)) => (Cow::Borrowed(preview.as_str()), *success),
-            Err(error) => (Cow::Owned(error.to_string()), false),
+        let (output, success, usage) = match &result {
+            Ok((preview, success, usage)) => (Cow::Borrowed(preview.as_str()), *success, *usage),
+            Err(error) => (Cow::Owned(error.to_string()), false, ToolUsage::default()),
         };
 
-        self.tool_result_with_tags(
+        self.tool_result_with_tags_and_usage(
             tool_name,
             call_id,
             arguments,
@@ -1031,6 +1082,8 @@ impl SessionTelemetry {
             output.as_ref(),
             extra_tags,
             extra_trace_fields,
+            reasoning_effort,
+            usage,
         );
 
         result
@@ -1072,6 +1125,34 @@ impl SessionTelemetry {
         extra_tags: &[(&str, &str)],
         extra_trace_fields: &[(&str, &str)],
     ) {
+        self.tool_result_with_tags_and_usage(
+            tool_name,
+            call_id,
+            arguments,
+            duration,
+            success,
+            output,
+            extra_tags,
+            extra_trace_fields,
+            /*reasoning_effort*/ None,
+            ToolUsage::default(),
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn tool_result_with_tags_and_usage(
+        &self,
+        tool_name: &str,
+        call_id: &str,
+        arguments: &str,
+        duration: Duration,
+        success: bool,
+        output: &str,
+        extra_tags: &[(&str, &str)],
+        extra_trace_fields: &[(&str, &str)],
+        reasoning_effort: Option<&str>,
+        usage: ToolUsage,
+    ) {
         let success_str = if success { "true" } else { "false" };
         let mut tags = Vec::with_capacity(2 + extra_tags.len());
         tags.push(("tool", tool_name));
@@ -1079,6 +1160,7 @@ impl SessionTelemetry {
         tags.extend_from_slice(extra_tags);
         self.counter(TOOL_CALL_COUNT_METRIC, /*inc*/ 1, &tags);
         self.record_duration(TOOL_CALL_DURATION_METRIC, duration, &tags);
+        self.record_tool_usage_metrics(&tags, usage);
         let mcp_server = trace_field_value(extra_trace_fields, "mcp_server").unwrap_or("");
         let mcp_server_origin =
             trace_field_value(extra_trace_fields, "mcp_server_origin").unwrap_or("");
@@ -1093,6 +1175,12 @@ impl SessionTelemetry {
             output = %output,
             mcp_server = %mcp_server,
             mcp_server_origin = %mcp_server_origin,
+            reasoning_effort = reasoning_effort,
+            model_read_line_count = usage.model_read_line_count,
+            file_edit_line_count = usage.file_edit_line_count,
+            file_edit_added_line_count = usage.file_edit_added_line_count,
+            file_edit_deleted_line_count = usage.file_edit_deleted_line_count,
+            file_edit_file_count = usage.file_edit_file_count,
         );
         trace_event!(
             self,
@@ -1106,7 +1194,49 @@ impl SessionTelemetry {
             output_line_count = output.lines().count() as i64,
             tool_origin = if mcp_server.is_empty() { "builtin" } else { "mcp" },
             mcp_tool = !mcp_server.is_empty(),
+            reasoning_effort = reasoning_effort,
+            model_read_line_count = usage.model_read_line_count,
+            file_edit_line_count = usage.file_edit_line_count,
+            file_edit_added_line_count = usage.file_edit_added_line_count,
+            file_edit_deleted_line_count = usage.file_edit_deleted_line_count,
+            file_edit_file_count = usage.file_edit_file_count,
         );
+    }
+
+    fn record_tool_usage_metrics(&self, tags: &[(&str, &str)], usage: ToolUsage) {
+        self.counter_if_positive(
+            TOOL_MODEL_READ_LINES_METRIC,
+            usage.model_read_line_count,
+            tags,
+        );
+        self.counter_if_positive(
+            TOOL_FILE_EDIT_LINES_METRIC,
+            usage.file_edit_line_count,
+            tags,
+        );
+        self.counter_if_positive(
+            TOOL_FILE_EDIT_ADDED_LINES_METRIC,
+            usage.file_edit_added_line_count,
+            tags,
+        );
+        self.counter_if_positive(
+            TOOL_FILE_EDIT_DELETED_LINES_METRIC,
+            usage.file_edit_deleted_line_count,
+            tags,
+        );
+        self.counter_if_positive(
+            TOOL_FILE_EDIT_FILES_METRIC,
+            usage.file_edit_file_count,
+            tags,
+        );
+    }
+
+    fn counter_if_positive(&self, name: &str, value: Option<i64>, tags: &[(&str, &str)]) {
+        if let Some(value) = value
+            && value > 0
+        {
+            self.counter(name, value, tags);
+        }
     }
 
     fn record_responses_websocket_timing_metrics(&self, value: &serde_json::Value) {
