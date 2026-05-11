@@ -138,6 +138,13 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         self.display_lines(width)
     }
 
+    /// Returns the logical text copied by transcript-overlay copy actions.
+    ///
+    /// Implementations should return source-level text, not viewport-wrapped render output.
+    fn copy_text(&self) -> Option<String> {
+        None
+    }
+
     /// Returns the number of viewport rows for the transcript overlay.
     ///
     /// Uses the same `Paragraph::line_count` measurement as
@@ -303,6 +310,23 @@ fn trim_trailing_blank_lines(mut lines: Vec<Line<'static>>) -> Vec<Line<'static>
     lines
 }
 
+fn line_plain_text(line: &Line<'_>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect()
+}
+
+fn lines_plain_text(lines: &[Line<'_>]) -> Option<String> {
+    let text = lines
+        .iter()
+        .map(line_plain_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let text = text.trim_matches('\n').to_string();
+    (!text.trim().is_empty()).then_some(text)
+}
+
 impl HistoryCell for UserHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let wrap_width = width
@@ -386,6 +410,10 @@ impl HistoryCell for UserHistoryCell {
 
         lines.push(Line::from("").style(style));
         lines
+    }
+
+    fn copy_text(&self) -> Option<String> {
+        (!self.message.trim().is_empty()).then(|| self.message.clone())
     }
 }
 
@@ -485,6 +513,10 @@ impl HistoryCell for AgentMessageCell {
 
     fn is_stream_continuation(&self) -> bool {
         !self.is_first_line
+    }
+
+    fn copy_text(&self) -> Option<String> {
+        lines_plain_text(&self.lines)
     }
 }
 
@@ -3656,6 +3688,33 @@ mod tests {
         let cell = AgentMessageCell::new(vec![Line::default()], /*is_first_line*/ false);
         assert_eq!(cell.transcript_lines(/*width*/ 80), vec![Line::from("  ")]);
         assert_eq!(cell.desired_transcript_height(/*width*/ 80), 1);
+    }
+
+    #[test]
+    fn user_history_copy_text_uses_source_message() {
+        let message =
+            "a long user prompt that will wrap visually but should copy as one logical line";
+        let cell = UserHistoryCell {
+            message: message.to_string(),
+            text_elements: Vec::new(),
+            local_image_paths: Vec::new(),
+            remote_image_urls: Vec::new(),
+        };
+
+        assert_eq!(cell.copy_text(), Some(message.to_string()));
+    }
+
+    #[test]
+    fn agent_message_copy_text_uses_logical_lines() {
+        let cell = AgentMessageCell::new(
+            vec![Line::from("first logical line"), Line::from("second")],
+            /*is_first_line*/ true,
+        );
+
+        assert_eq!(
+            cell.copy_text(),
+            Some("first logical line\nsecond".to_string())
+        );
     }
 
     #[test]

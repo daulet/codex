@@ -36,6 +36,7 @@ use crate::history_cell::AgentMessageCell;
 use crate::history_cell::SessionInfoCell;
 use crate::history_cell::UserHistoryCell;
 use crate::pager_overlay::Overlay;
+use crate::pager_overlay::TranscriptOverlayStatusKind;
 use crate::tui;
 use crate::tui::TuiEvent;
 use codex_protocol::ThreadId;
@@ -112,6 +113,13 @@ impl App {
         tui: &mut tui::Tui,
         event: TuiEvent,
     ) -> Result<bool> {
+        if matches!(self.overlay, Some(Overlay::Transcript(_)))
+            && let TuiEvent::Key(key_event) = &event
+            && crate::pager_overlay::transcript_copy_key_matches(*key_event)
+        {
+            self.copy_selected_transcript_item(tui);
+            return Ok(true);
+        }
         if self.backtrack.overlay_preview_active {
             match event {
                 TuiEvent::Key(KeyEvent {
@@ -421,6 +429,35 @@ impl App {
             }
         }
         Ok(())
+    }
+
+    fn copy_selected_transcript_item(&mut self, tui: &mut tui::Tui) {
+        let selection = match &self.overlay {
+            Some(Overlay::Transcript(overlay)) => overlay.selected_copy_text(),
+            _ => None,
+        };
+
+        let (message, kind) = match selection {
+            Some(selection) => match self.chat_widget.copy_text_to_clipboard(&selection.text) {
+                Ok(()) => (
+                    format!("Copied selected {} to clipboard", selection.label),
+                    TranscriptOverlayStatusKind::Info,
+                ),
+                Err(error) => (
+                    format!("Copy failed: {error}"),
+                    TranscriptOverlayStatusKind::Error,
+                ),
+            },
+            None => (
+                "No user or assistant message selected".to_string(),
+                TranscriptOverlayStatusKind::Error,
+            ),
+        };
+
+        if let Some(Overlay::Transcript(overlay)) = &mut self.overlay {
+            overlay.set_status_message(message, kind);
+        }
+        tui.frame_requester().schedule_frame();
     }
 
     /// Handle Enter in overlay backtrack preview: confirm selection and reset state.
