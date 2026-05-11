@@ -332,7 +332,14 @@ impl ToolRegistry {
         let tool_name_flat = flat_tool_name(&tool_name);
         let call_id_owned = invocation.call_id.clone();
         let otel = invocation.turn.session_telemetry.clone();
+        let reasoning_effort = invocation
+            .turn
+            .reasoning_effort
+            .map(|effort| effort.to_string())
+            .unwrap_or_else(|| "none".to_string());
+        let reasoning_effort_ref = Some(reasoning_effort.as_str());
         let base_tool_result_tags = [
+            ("reasoning_effort", reasoning_effort.as_str()),
             (
                 "sandbox",
                 permission_profile_sandbox_tag(
@@ -365,7 +372,7 @@ impl ToolRegistry {
             None => {
                 let message = unsupported_tool_call_message(&invocation.payload, &tool_name);
                 let log_payload = invocation.payload.log_payload();
-                otel.tool_result_with_tags(
+                otel.tool_result_with_tags_and_usage(
                     tool_name_flat.as_ref(),
                     &call_id_owned,
                     log_payload.as_ref(),
@@ -374,6 +381,8 @@ impl ToolRegistry {
                     &message,
                     &base_tool_result_tags,
                     /*extra_trace_fields*/ &[],
+                    reasoning_effort_ref,
+                    Default::default(),
                 );
                 let err = FunctionCallError::RespondToModel(message);
                 dispatch_trace.record_failed(&err);
@@ -396,7 +405,7 @@ impl ToolRegistry {
         if !tool.matches_kind(&invocation.payload) {
             let message = format!("tool {tool_name} invoked with incompatible payload");
             let log_payload = invocation.payload.log_payload();
-            otel.tool_result_with_tags(
+            otel.tool_result_with_tags_and_usage(
                 tool_name_flat.as_ref(),
                 &call_id_owned,
                 log_payload.as_ref(),
@@ -405,6 +414,8 @@ impl ToolRegistry {
                 &message,
                 &tool_result_tags,
                 &extra_trace_fields,
+                reasoning_effort_ref,
+                Default::default(),
             );
             let err = FunctionCallError::Fatal(message);
             dispatch_trace.record_failed(&err);
@@ -461,26 +472,30 @@ impl ToolRegistry {
 
         let response_cell = tokio::sync::Mutex::new(None);
         let invocation_for_tool = invocation.clone();
+        let payload_for_usage = invocation.payload.clone();
         let log_payload = invocation.payload.log_payload();
 
         let result = otel
-            .log_tool_result_with_tags(
+            .log_tool_result_with_tags_and_usage(
                 tool_name_flat.as_ref(),
                 &call_id_owned,
                 log_payload.as_ref(),
                 &tool_result_tags,
                 &extra_trace_fields,
+                reasoning_effort_ref,
                 || {
                     let tool = tool.clone();
+                    let payload_for_usage = payload_for_usage.clone();
                     let response_cell = &response_cell;
                     async move {
                         match handle_any_tool(tool.as_ref(), invocation_for_tool).await {
                             Ok(result) => {
                                 let preview = result.result.log_preview();
                                 let success = result.result.success_for_logging();
+                                let usage = result.result.telemetry_usage(&payload_for_usage);
                                 let mut guard = response_cell.lock().await;
                                 *guard = Some(result);
-                                Ok((preview, success))
+                                Ok((preview, success, usage))
                             }
                             Err(err) => Err(err),
                         }
@@ -489,7 +504,7 @@ impl ToolRegistry {
             )
             .await;
         let success = match &result {
-            Ok((_, success)) => *success,
+            Ok((_, success, _usage)) => *success,
             Err(_) => false,
         };
         emit_metric_for_tool_read(&invocation, success).await;

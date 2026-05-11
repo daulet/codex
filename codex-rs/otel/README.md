@@ -96,6 +96,12 @@ let manager = SessionTelemetry::new(
 manager.user_prompt(&prompt_items);
 ```
 
+Tool-result events are emitted as `codex.tool_result`. The trace-safe event
+includes model/tool metadata, duration, success, output size, model-visible
+line counts, and structured file-edit churn when the tool reports it. The
+log-only event also includes the raw arguments and output preview for
+deployments that opt into those logs.
+
 ## Metrics (OTLP or in-memory)
 
 Modes:
