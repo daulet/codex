@@ -5412,6 +5412,10 @@ impl ChatWidget {
         self.copy_last_agent_markdown_with(crate::clipboard_copy::copy_to_clipboard);
     }
 
+    pub(crate) fn copy_text_to_clipboard(&mut self, text: &str) -> Result<(), String> {
+        self.copy_text_to_clipboard_with(text, crate::clipboard_copy::copy_to_clipboard)
+    }
+
     pub(crate) fn truncate_agent_copy_history_to_user_turn_count(
         &mut self,
         user_turn_count: usize,
@@ -5435,18 +5439,19 @@ impl ChatWidget {
         copy_fn: impl FnOnce(&str) -> Result<Option<crate::clipboard_copy::ClipboardLease>, String>,
     ) {
         match self.last_agent_markdown.clone() {
-            Some(markdown) if !markdown.is_empty() => match copy_fn(&markdown) {
-                Ok(lease) => {
-                    self.clipboard_lease = lease;
-                    self.add_to_history(history_cell::new_info_event(
-                        "Copied last message to clipboard".into(),
-                        /*hint*/ None,
-                    ));
+            Some(markdown) if !markdown.is_empty() => {
+                match self.copy_text_to_clipboard_with(&markdown, copy_fn) {
+                    Ok(()) => {
+                        self.add_to_history(history_cell::new_info_event(
+                            "Copied last message to clipboard".into(),
+                            /*hint*/ None,
+                        ));
+                    }
+                    Err(error) => self.add_to_history(history_cell::new_error_event(format!(
+                        "Copy failed: {error}"
+                    ))),
                 }
-                Err(error) => self.add_to_history(history_cell::new_error_event(format!(
-                    "Copy failed: {error}"
-                ))),
-            },
+            }
             _ if self.copy_history_evicted_by_rollback => {
                 self.add_to_history(history_cell::new_error_event(format!(
                     "Cannot copy that response after rewinding. Only the most recent {MAX_AGENT_COPY_HISTORY} responses are available to /copy."
@@ -5457,6 +5462,16 @@ impl ChatWidget {
             )),
         }
         self.request_redraw();
+    }
+
+    fn copy_text_to_clipboard_with(
+        &mut self,
+        text: &str,
+        copy_fn: impl FnOnce(&str) -> Result<Option<crate::clipboard_copy::ClipboardLease>, String>,
+    ) -> Result<(), String> {
+        copy_fn(text).map(|lease| {
+            self.clipboard_lease = lease;
+        })
     }
 
     #[cfg(test)]
