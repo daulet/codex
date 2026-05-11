@@ -1,0 +1,14 @@
+---
+source: tui/src/pager_overlay.rs
+expression: term.backend()
+---
+"/ T R A N S C R I P T / / / / / / / / / / / / / / / / / / / / / / / / / "
+"                                                                        "
+"› first user                                                            "
+"                                                                        "
+"                                                                        "
+"• assistant                                                             "
+"───────────────────────────────────────────────────────────────── 100% ─"
+" ↑/↓ to scroll   pgup/pgdn to page   home/end to jump                   "
+" q to quit   ←/→ to select   c to copy   esc to edit prev               "
+"                                                                        "

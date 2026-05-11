@@ -205,6 +205,7 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         }
     }
 
+<<<<<<< HEAD
     fn display_hyperlink_lines_for_mode(
         &self,
         width: u16,
@@ -214,6 +215,11 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
             HistoryRenderMode::Rich => self.display_hyperlink_lines(width),
             HistoryRenderMode::Raw => plain_hyperlink_lines(self.raw_lines()),
         }
+    }
+
+    /// Returns source-level text for transcript-overlay copy actions.
+    fn copy_text(&self) -> Option<String> {
+        None
     }
 
     /// Returns the number of viewport rows needed to render this cell.

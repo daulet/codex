@@ -2569,3 +2569,29 @@ fn consolidation_walker_replaces_agent_message_cells() {
         "second cell should be AgentMarkdownCell"
     );
 }
+
+#[test]
+fn user_history_copy_text_uses_source_message() {
+    let message = "a long user prompt that will wrap visually but should copy as one logical line";
+    let cell = UserHistoryCell {
+        message: message.to_string(),
+        text_elements: Vec::new(),
+        local_image_paths: Vec::new(),
+        remote_image_urls: Vec::new(),
+    };
+
+    assert_eq!(cell.copy_text(), Some(message.to_string()));
+}
+
+#[test]
+fn agent_message_copy_text_uses_logical_lines() {
+    let cell = AgentMessageCell::new(
+        vec![Line::from("first logical line"), Line::from("second")],
+        /*is_first_line*/ true,
+    );
+
+    assert_eq!(
+        cell.copy_text(),
+        Some("first logical line\nsecond".to_string())
+    );
+}
