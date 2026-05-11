@@ -19,6 +19,8 @@ use std::io::Result;
 use std::sync::Arc;
 
 use crate::chatwidget::ActiveCellTranscriptKey;
+use crate::history_cell::AgentMarkdownCell;
+use crate::history_cell::AgentMessageCell;
 use crate::history_cell::HistoryCell;
 use crate::history_cell::UserHistoryCell;
 use crate::key_hint;
@@ -91,6 +93,10 @@ impl Overlay {
 fn first_or_empty(bindings: &[KeyBinding]) -> Vec<KeyBinding> {
     bindings.first().copied().into_iter().collect()
 }
+
+const KEY_COPY: KeyBinding = key_hint::plain(KeyCode::Char('c'));
+const KEY_COPY_SELECT_PREVIOUS: KeyBinding = key_hint::plain(KeyCode::Left);
+const KEY_COPY_SELECT_NEXT: KeyBinding = key_hint::plain(KeyCode::Right);
 
 // Render a single line of key hints from (key(s), description) pairs.
 fn render_key_hints(area: Rect, buf: &mut Buffer, pairs: &[(Vec<KeyBinding>, &str)]) {
@@ -414,10 +420,28 @@ pub(crate) struct TranscriptOverlay {
     view: PagerView,
     /// Committed transcript cells (does not include the live tail).
     cells: Vec<Arc<dyn HistoryCell>>,
+    copy_selection_cell: Option<usize>,
     highlight_cell: Option<usize>,
     /// Cache key for the render-only live tail appended after committed cells.
     live_tail_key: Option<LiveTailKey>,
+    status: Option<TranscriptOverlayStatus>,
     is_done: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TranscriptOverlayStatusKind {
+    Info,
+    Error,
+}
+
+struct TranscriptOverlayStatus {
+    message: String,
+    kind: TranscriptOverlayStatusKind,
+}
+
+pub(crate) struct TranscriptCopySelection {
+    pub(crate) text: String,
+    pub(crate) label: &'static str,
 }
 
 /// Cache key for the active-cell "live tail" appended to the transcript overlay.
@@ -441,22 +465,30 @@ impl TranscriptOverlay {
     /// This overlay does not own the "active cell"; callers may optionally append a live tail via
     /// `sync_live_tail` during draws to reflect in-flight activity.
     pub(crate) fn new(transcript_cells: Vec<Arc<dyn HistoryCell>>, keymap: PagerKeymap) -> Self {
+        let copy_selection_cell = Self::last_copyable_cell(&transcript_cells);
         Self {
             view: PagerView::new(
-                Self::render_cells(&transcript_cells, /*highlight_cell*/ None),
+                Self::render_cells(
+                    &transcript_cells,
+                    copy_selection_cell,
+                    /*highlight_cell*/ None,
+                ),
                 "T R A N S C R I P T".to_string(),
                 usize::MAX,
                 keymap,
             ),
             cells: transcript_cells,
+            copy_selection_cell,
             highlight_cell: None,
             live_tail_key: None,
+            status: None,
             is_done: false,
         }
     }
 
     fn render_cells(
         cells: &[Arc<dyn HistoryCell>],
+        copy_selection_cell: Option<usize>,
         highlight_cell: Option<usize>,
     ) -> Vec<Box<dyn Renderable>> {
         cells
@@ -464,10 +496,11 @@ impl TranscriptOverlay {
             .enumerate()
             .flat_map(|(i, c)| {
                 let mut v: Vec<Box<dyn Renderable>> = Vec::new();
+                let is_selected = highlight_cell.or(copy_selection_cell) == Some(i);
                 let mut cell_renderable = if c.as_any().is::<UserHistoryCell>() {
                     Box::new(CachedRenderable::new(CellRenderable {
                         cell: c.clone(),
-                        style: if highlight_cell == Some(i) {
+                        style: if is_selected {
                             user_message_style().reversed()
                         } else {
                             user_message_style()
@@ -476,7 +509,11 @@ impl TranscriptOverlay {
                 } else {
                     Box::new(CachedRenderable::new(CellRenderable {
                         cell: c.clone(),
-                        style: Style::default(),
+                        style: if is_selected {
+                            Style::default().reversed()
+                        } else {
+                            Style::default()
+                        },
                     })) as Box<dyn Renderable>
                 };
                 if !c.is_stream_continuation() && i > 0 {
@@ -508,7 +545,11 @@ impl TranscriptOverlay {
         let had_prior_cells = !self.cells.is_empty();
         let tail_renderable = self.take_live_tail_renderable();
         self.cells.push(cell);
-        self.view.renderables = Self::render_cells(&self.cells, self.highlight_cell);
+        if self.copy_selection_cell.is_none() {
+            self.copy_selection_cell = Self::last_copyable_cell(&self.cells);
+        }
+        self.view.renderables =
+            Self::render_cells(&self.cells, self.copy_selection_cell, self.highlight_cell);
         if let Some(tail) = tail_renderable {
             let tail = if !had_prior_cells
                 && self
@@ -547,6 +588,11 @@ impl TranscriptOverlay {
         {
             self.highlight_cell = None;
         }
+        if self.copy_selection_cell.is_some_and(|idx| {
+            idx >= self.cells.len() || !Self::is_copyable_anchor(&self.cells[idx])
+        }) {
+            self.copy_selection_cell = Self::last_copyable_cell(&self.cells);
+        }
         self.rebuild_renderables();
         if follow_bottom {
             self.view.scroll_offset = usize::MAX;
@@ -581,6 +627,16 @@ impl TranscriptOverlay {
                     *highlight_cell = highlight_cell.saturating_sub(removed.saturating_sub(1));
                 }
             }
+            if let Some(copy_selection_cell) = self.copy_selection_cell.as_mut()
+                && *copy_selection_cell >= clamped_start
+            {
+                if *copy_selection_cell < clamped_end {
+                    *copy_selection_cell = clamped_start;
+                } else {
+                    *copy_selection_cell =
+                        copy_selection_cell.saturating_sub(removed.saturating_sub(1));
+                }
+            }
             self.cells
                 .splice(clamped_start..clamped_end, std::iter::once(consolidated));
             if self
@@ -588,6 +644,11 @@ impl TranscriptOverlay {
                 .is_some_and(|highlight_cell| highlight_cell >= self.cells.len())
             {
                 self.highlight_cell = None;
+            }
+            if self.copy_selection_cell.is_some_and(|idx| {
+                idx >= self.cells.len() || !Self::is_copyable_anchor(&self.cells[idx])
+            }) {
+                self.copy_selection_cell = Self::last_copyable_cell(&self.cells);
             }
             self.rebuild_renderables();
         }
@@ -652,6 +713,21 @@ impl TranscriptOverlay {
         }
     }
 
+    pub(crate) fn set_status_message(
+        &mut self,
+        message: String,
+        kind: TranscriptOverlayStatusKind,
+    ) {
+        self.status = Some(TranscriptOverlayStatus { message, kind });
+    }
+
+    pub(crate) fn selected_copy_text(&self) -> Option<TranscriptCopySelection> {
+        let idx = self.highlight_cell.or(self.copy_selection_cell)?;
+        let label = self.copy_selection_label(idx)?;
+        self.copy_selection_text(idx)
+            .map(|text| TranscriptCopySelection { text, label })
+    }
+
     /// Returns whether the underlying pager view is currently pinned to the bottom.
     ///
     /// The `App` draw loop uses this to decide whether to schedule animation frames for the live
@@ -662,9 +738,115 @@ impl TranscriptOverlay {
 
     fn rebuild_renderables(&mut self) {
         let tail_renderable = self.take_live_tail_renderable();
-        self.view.renderables = Self::render_cells(&self.cells, self.highlight_cell);
+        self.view.renderables =
+            Self::render_cells(&self.cells, self.copy_selection_cell, self.highlight_cell);
         if let Some(tail) = tail_renderable {
             self.view.renderables.push(tail);
+        }
+    }
+
+    fn last_copyable_cell(cells: &[Arc<dyn HistoryCell>]) -> Option<usize> {
+        cells
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(idx, cell)| Self::is_copyable_anchor(cell).then_some(idx))
+    }
+
+    fn is_copyable_anchor(cell: &Arc<dyn HistoryCell>) -> bool {
+        cell.as_any().is::<UserHistoryCell>()
+            || cell.as_any().is::<AgentMarkdownCell>()
+            || (cell.as_any().is::<AgentMessageCell>() && !cell.is_stream_continuation())
+    }
+
+    fn copy_selection_label(&self, idx: usize) -> Option<&'static str> {
+        let cell = self.cells.get(idx)?;
+        if cell.as_any().is::<UserHistoryCell>() {
+            Some("user message")
+        } else if cell.as_any().is::<AgentMarkdownCell>() || cell.as_any().is::<AgentMessageCell>() {
+            Some("assistant message")
+        } else {
+            None
+        }
+    }
+
+    fn copy_selection_text(&self, idx: usize) -> Option<String> {
+        let cell = self.cells.get(idx)?;
+        if cell.as_any().is::<AgentMessageCell>() {
+            return self.agent_message_group_text(idx);
+        }
+        cell.copy_text()
+    }
+
+    fn agent_message_group_text(&self, idx: usize) -> Option<String> {
+        let mut start = idx;
+        while start > 0
+            && self.cells[start].as_any().is::<AgentMessageCell>()
+            && self.cells[start].is_stream_continuation()
+            && self.cells[start - 1].as_any().is::<AgentMessageCell>()
+        {
+            start -= 1;
+        }
+
+        let mut chunks = Vec::new();
+        let mut current = start;
+        while let Some(cell) = self.cells.get(current)
+            && cell.as_any().is::<AgentMessageCell>()
+        {
+            if current != start && !cell.is_stream_continuation() {
+                break;
+            }
+            if let Some(text) = cell.copy_text() {
+                chunks.push(text);
+            }
+            current += 1;
+        }
+
+        let text = chunks.join("\n");
+        (!text.trim().is_empty()).then_some(text)
+    }
+
+    fn move_copy_selection(&mut self, direction: CopySelectionDirection) {
+        let Some(next) = self.next_copyable_cell(direction) else {
+            return;
+        };
+        self.copy_selection_cell = Some(next);
+        self.status = None;
+        self.rebuild_renderables();
+        if self.highlight_cell.is_none() {
+            self.view.scroll_chunk_into_view(next);
+        }
+    }
+
+    fn next_copyable_cell(&self, direction: CopySelectionDirection) -> Option<usize> {
+        let copyable = self
+            .cells
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, cell)| Self::is_copyable_anchor(cell).then_some(idx))
+            .collect::<Vec<_>>();
+        if copyable.is_empty() {
+            return None;
+        }
+
+        let current = self.copy_selection_cell.unwrap_or_else(|| match direction {
+            CopySelectionDirection::Previous => copyable[0],
+            CopySelectionDirection::Next => *copyable.last().unwrap_or(&copyable[0]),
+        });
+        let position = copyable.iter().position(|idx| *idx == current);
+        match (direction, position) {
+            (CopySelectionDirection::Previous, Some(0)) => Some(copyable[0]),
+            (CopySelectionDirection::Previous, Some(pos)) => copyable.get(pos - 1).copied(),
+            (CopySelectionDirection::Previous, None) => {
+                copyable.iter().rev().find(|idx| **idx < current).copied()
+            }
+            (CopySelectionDirection::Next, Some(pos)) if pos + 1 < copyable.len() => {
+                copyable.get(pos + 1).copied()
+            }
+            (CopySelectionDirection::Next, Some(_)) => copyable.last().copied(),
+            (CopySelectionDirection::Next, None) => {
+                copyable.iter().find(|idx| **idx > current).copied()
+            }
         }
     }
 
@@ -738,10 +920,26 @@ impl TranscriptOverlay {
             ));
             pairs.push((vec![key_hint::plain(KeyCode::Right)], "to edit next"));
             pairs.push((vec![key_hint::plain(KeyCode::Enter)], "to edit message"));
+            pairs.push((vec![KEY_COPY], "to copy"));
         } else {
+            if self.copy_selection_cell.is_some() {
+                pairs.push((
+                    vec![KEY_COPY_SELECT_PREVIOUS, KEY_COPY_SELECT_NEXT],
+                    "to select",
+                ));
+                pairs.push((vec![KEY_COPY], "to copy"));
+            }
             pairs.push((vec![key_hint::plain(KeyCode::Esc)], "to edit prev"));
         }
-        render_key_hints(line2, buf, &pairs);
+        if let Some(status) = &self.status {
+            let style = match status.kind {
+                TranscriptOverlayStatusKind::Info => Style::default().dim(),
+                TranscriptOverlayStatusKind::Error => Style::default().red(),
+            };
+            Paragraph::new(Line::from(status.message.clone()).style(style)).render_ref(line2, buf);
+        } else {
+            render_key_hints(line2, buf, &pairs);
+        }
     }
 
     pub(crate) fn render(&mut self, area: Rect, buf: &mut Buffer) {
@@ -763,6 +961,18 @@ impl TranscriptOverlay {
                     self.is_done = true;
                     Ok(())
                 }
+                e if self.highlight_cell.is_none() && KEY_COPY_SELECT_PREVIOUS.is_press(e) => {
+                    self.move_copy_selection(CopySelectionDirection::Previous);
+                    tui.frame_requester()
+                        .schedule_frame_in(crate::tui::TARGET_FRAME_INTERVAL);
+                    Ok(())
+                }
+                e if self.highlight_cell.is_none() && KEY_COPY_SELECT_NEXT.is_press(e) => {
+                    self.move_copy_selection(CopySelectionDirection::Next);
+                    tui.frame_requester()
+                        .schedule_frame_in(crate::tui::TARGET_FRAME_INTERVAL);
+                    Ok(())
+                }
                 other => self.view.handle_key_event(tui, other),
             },
             TuiEvent::Draw | TuiEvent::Resize => {
@@ -782,6 +992,16 @@ impl TranscriptOverlay {
     pub(crate) fn committed_cell_count(&self) -> usize {
         self.cells.len()
     }
+}
+
+#[derive(Clone, Copy)]
+enum CopySelectionDirection {
+    Previous,
+    Next,
+}
+
+pub(crate) fn transcript_copy_key_matches(key_event: KeyEvent) -> bool {
+    KEY_COPY.is_press(key_event)
 }
 
 pub(crate) struct StaticOverlay {
@@ -984,6 +1204,29 @@ mod tests {
         )
     }
 
+    fn user_cell(message: &str) -> Arc<dyn HistoryCell> {
+        Arc::new(history_cell::UserHistoryCell {
+            message: message.to_string(),
+            text_elements: Vec::new(),
+            local_image_paths: Vec::new(),
+            remote_image_urls: Vec::new(),
+        })
+    }
+
+    fn agent_cell(message: &str, is_first_line: bool) -> Arc<dyn HistoryCell> {
+        Arc::new(history_cell::AgentMessageCell::new(
+            vec![Line::from(message.to_string())],
+            is_first_line,
+        ))
+    }
+
+    fn agent_markdown_cell(markdown: &str) -> Arc<dyn HistoryCell> {
+        Arc::new(history_cell::AgentMarkdownCell::new(
+            markdown.to_string(),
+            std::path::Path::new("/tmp"),
+        ))
+    }
+
     #[test]
     fn edit_prev_hint_is_visible() {
         let mut overlay = transcript_overlay(vec![Arc::new(TestCell {
@@ -1019,6 +1262,60 @@ mod tests {
             s.contains("edit next"),
             "expected 'edit next' hint in overlay footer, got: {s:?}"
         );
+    }
+
+    #[test]
+    fn transcript_overlay_copy_selection_defaults_to_latest_copyable_message() {
+        let overlay = transcript_overlay(vec![
+            user_cell("first user"),
+            agent_cell("assistant first chunk", /*is_first_line*/ true),
+            agent_cell("assistant continuation", /*is_first_line*/ false),
+        ]);
+
+        let selection = overlay.selected_copy_text().expect("copy selection");
+        assert_eq!(selection.label, "assistant message");
+        assert_eq!(
+            selection.text,
+            "assistant first chunk\nassistant continuation"
+        );
+    }
+
+    #[test]
+    fn transcript_overlay_copy_selection_includes_finalized_assistant_markdown() {
+        let overlay = transcript_overlay(vec![
+            user_cell("first user"),
+            agent_markdown_cell("assistant **markdown**"),
+        ]);
+
+        let selection = overlay.selected_copy_text().expect("copy selection");
+        assert_eq!(selection.label, "assistant message");
+        assert_eq!(selection.text, "assistant **markdown**");
+    }
+
+    #[test]
+    fn transcript_overlay_copy_selection_moves_between_user_and_assistant() {
+        let mut overlay = transcript_overlay(vec![
+            user_cell("first user"),
+            agent_cell("assistant", /*is_first_line*/ true),
+        ]);
+
+        overlay.move_copy_selection(CopySelectionDirection::Previous);
+        let selection = overlay.selected_copy_text().expect("copy selection");
+
+        assert_eq!(selection.label, "user message");
+        assert_eq!(selection.text, "first user");
+    }
+
+    #[test]
+    fn transcript_overlay_copy_hint_snapshot() {
+        let mut overlay = transcript_overlay(vec![
+            user_cell("first user"),
+            agent_cell("assistant", /*is_first_line*/ true),
+        ]);
+        let mut term = Terminal::new(TestBackend::new(72, 10)).expect("term");
+        term.draw(|f| overlay.render(f.area(), f.buffer_mut()))
+            .expect("draw");
+        assert_snapshot!(term.backend());
     }
 
     #[test]
