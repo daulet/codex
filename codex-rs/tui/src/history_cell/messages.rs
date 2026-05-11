@@ -91,6 +91,23 @@ fn trim_trailing_blank_lines(mut lines: Vec<Line<'static>>) -> Vec<Line<'static>
     lines
 }
 
+fn line_plain_text(line: &Line<'_>) -> String {
+    line.spans
+        .iter()
+        .map(|span| span.content.as_ref())
+        .collect()
+}
+
+fn lines_plain_text(lines: &[Line<'_>]) -> Option<String> {
+    let text = lines
+        .iter()
+        .map(line_plain_text)
+        .collect::<Vec<_>>()
+        .join("\n");
+    let text = text.trim_matches('\n').to_string();
+    (!text.trim().is_empty()).then_some(text)
+}
+
 impl HistoryCell for UserHistoryCell {
     fn display_lines(&self, width: u16) -> Vec<Line<'static>> {
         let wrap_width = width
@@ -190,6 +207,10 @@ impl HistoryCell for UserHistoryCell {
             );
         }
         lines
+    }
+
+    fn copy_text(&self) -> Option<String> {
+        (!self.message.trim().is_empty()).then(|| self.message.clone())
     }
 }
 
@@ -302,6 +323,10 @@ impl HistoryCell for AgentMessageCell {
     fn is_stream_continuation(&self) -> bool {
         !self.is_first_line
     }
+
+    fn copy_text(&self) -> Option<String> {
+        lines_plain_text(&self.lines)
+    }
 }
 
 /// A consolidated agent message cell that stores raw markdown source and re-renders from it.
@@ -357,6 +382,10 @@ impl HistoryCell for AgentMarkdownCell {
 
     fn raw_lines(&self) -> Vec<Line<'static>> {
         raw_lines_from_source(&self.markdown_source)
+    }
+
+    fn copy_text(&self) -> Option<String> {
+        (!self.markdown_source.trim().is_empty()).then(|| self.markdown_source.clone())
     }
 }
 

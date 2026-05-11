@@ -194,6 +194,11 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         }
     }
 
+    /// Returns source-level text for transcript-overlay copy actions.
+    fn copy_text(&self) -> Option<String> {
+        None
+    }
+
     /// Returns the number of viewport rows needed to render this cell.
     ///
     /// The default delegates to `Paragraph::line_count` with
