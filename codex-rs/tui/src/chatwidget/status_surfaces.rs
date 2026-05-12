@@ -186,10 +186,7 @@ impl ChatWidget {
                 StatusLineItem::ModelName | StatusLineItem::ModelWithReasoning
             )
         });
-        let mut line = status_line_from_segments(
-            segments,
-            self.config.tui_status_line_use_colors,
-        );
+        let mut line = status_line_from_segments(segments, self.config.tui_status_line_use_colors);
         if show_fork_badge && let Some(line) = line.as_mut() {
             let mut spans = vec![FORK_STATUS_BADGE.cyan().dim(), " · ".dim()];
             spans.append(&mut line.spans);

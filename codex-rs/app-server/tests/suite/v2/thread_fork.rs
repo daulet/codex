@@ -52,6 +52,7 @@ use super::analytics::wait_for_analytics_payload;
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(25);
 #[cfg(not(windows))]
 const DEFAULT_READ_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+const INVALID_REQUEST_ERROR_CODE: i64 = -32600;
 
 #[tokio::test]
 async fn thread_fork_creates_new_thread_and_emits_started() -> Result<()> {
@@ -270,7 +271,7 @@ async fn thread_fork_can_load_source_by_path() -> Result<()> {
 }
 
 #[tokio::test]
-async fn thread_fork_by_path_uses_remote_thread_store_error() -> Result<()> {
+async fn thread_fork_by_path_uses_non_local_thread_store_error() -> Result<()> {
     let server = create_mock_responses_server_repeating_assistant("Done").await;
     let codex_home = TempDir::new()?;
     create_config_toml_with_remote_thread_store(codex_home.path(), &server.uri())?;
@@ -291,10 +292,10 @@ async fn thread_fork_by_path_uses_remote_thread_store_error() -> Result<()> {
     )
     .await??;
 
-    assert_eq!(fork_err.error.code, INTERNAL_ERROR_CODE);
+    assert_eq!(fork_err.error.code, INVALID_REQUEST_ERROR_CODE);
     assert_eq!(
         fork_err.error.message,
-        "failed to read thread: thread-store internal error: remote thread store does not support read_thread_by_rollout_path"
+        "in-memory thread store does not know rollout path sessions/2025/01/05/rollout.jsonl"
     );
 
     Ok(())
@@ -846,6 +847,37 @@ fn create_config_toml(codex_home: &Path, server_uri: &str) -> std::io::Result<()
 model = "mock-model"
 approval_policy = "never"
 sandbox_mode = "read-only"
+
+model_provider = "mock_provider"
+
+[model_providers.mock_provider]
+name = "Mock provider for test"
+base_url = "{server_uri}/v1"
+wire_api = "responses"
+request_max_retries = 0
+stream_max_retries = 0
+"#
+        ),
+    )
+}
+
+fn create_config_toml_with_remote_thread_store(
+    codex_home: &Path,
+    server_uri: &str,
+) -> std::io::Result<()> {
+    let config_toml = codex_home.join("config.toml");
+    let store_id = codex_home
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("thread-fork-remote-store");
+    std::fs::write(
+        config_toml,
+        format!(
+            r#"
+model = "mock-model"
+approval_policy = "never"
+sandbox_mode = "read-only"
+experimental_thread_store = {{ type = "in_memory", id = "{store_id}" }}
 
 model_provider = "mock_provider"
 

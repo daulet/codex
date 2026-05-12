@@ -203,8 +203,8 @@ async fn resolve_rollout_path(
             )
             .await
             .map_err(|err| ThreadStoreError::InvalidRequest {
-            message: format!("failed to locate archived thread id {thread_id}: {err}"),
-        }),
+                message: format!("failed to locate archived thread id {thread_id}: {err}"),
+            }),
         }
     } else {
         find_thread_path_by_id_str(
@@ -289,8 +289,9 @@ async fn stored_thread_from_sqlite_metadata(
         .ok()
         .map(|meta_line| meta_line.meta);
     let forked_from_id = session_meta.as_ref().and_then(|meta| meta.forked_from_id);
-    let side_conversation_from_rollout =
-        session_meta.as_ref().and_then(|meta| meta.side_conversation.clone());
+    let side_conversation_from_rollout = session_meta
+        .as_ref()
+        .and_then(|meta| meta.side_conversation.clone());
     let side_conversation_from_metadata = metadata.side_parent_thread_id.map(|parent_thread_id| {
         codex_protocol::protocol::SideConversationMeta {
             parent_thread_id,

@@ -120,7 +120,6 @@ impl SlashCommand {
             SlashCommand::Collab => "change collaboration mode (experimental)",
             SlashCommand::Agent | SlashCommand::MultiAgents => "switch the active agent thread",
             SlashCommand::Side => "start a persisted side conversation",
-            SlashCommand::Approvals => "choose what Codex is allowed to do",
             SlashCommand::Permissions => "choose what Codex is allowed to do",
             SlashCommand::Keymap => "remap TUI shortcuts",
             SlashCommand::Vim => "toggle Vim mode for the composer",

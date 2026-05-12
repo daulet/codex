@@ -704,7 +704,10 @@ pub(crate) fn populate_thread_turns_from_history(
     thread.turns = turns;
 }
 
-pub(crate) fn visible_rollout_items_for_thread(thread: &Thread, items: &[RolloutItem]) -> Vec<RolloutItem> {
+pub(crate) fn visible_rollout_items_for_thread(
+    thread: &Thread,
+    items: &[RolloutItem],
+) -> Vec<RolloutItem> {
     let Some(side_conversation) = thread.side_conversation.as_ref() else {
         return items.to_vec();
     };

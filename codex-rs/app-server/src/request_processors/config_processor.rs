@@ -136,7 +136,7 @@ impl ConfigRequestProcessor {
     ) -> Result<ClientResponsePayload, JSONRPCErrorError> {
         self.handle_config_mutation_result(self.write_value(params).await)
             .await
-            .map(ClientResponsePayload::ConfigValueWrite)
+            .map(|response| ClientResponsePayload::ConfigValueWrite(Box::new(response)))
     }
 
     pub(crate) async fn batch_write(
@@ -145,7 +145,7 @@ impl ConfigRequestProcessor {
     ) -> Result<ClientResponsePayload, JSONRPCErrorError> {
         self.handle_config_mutation_result(self.batch_write_inner(params).await)
             .await
-            .map(ClientResponsePayload::ConfigBatchWrite)
+            .map(|response| ClientResponsePayload::ConfigBatchWrite(Box::new(response)))
     }
 
     pub(crate) async fn experimental_feature_enablement_set(
@@ -158,10 +158,7 @@ impl ConfigRequestProcessor {
             .handle_config_mutation_result(self.set_experimental_feature_enablement(params).await)
             .await?;
         self.outgoing
-            .send_response_as(
-                request_id,
-                ClientResponsePayload::ExperimentalFeatureEnablementSet(response),
-            )
+            .send_response_as(request_id, ClientResponsePayload::from(response))
             .await;
         if should_refresh_apps_list {
             self.refresh_apps_list_after_experimental_feature_enablement_set()

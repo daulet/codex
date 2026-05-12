@@ -1748,7 +1748,9 @@ impl ThreadRequestProcessor {
             let thread_state = self.thread_state_manager.thread_state(thread_id).await;
             thread_state.lock().await.pending_thread_navigation = None;
 
-            return Err(internal_error(format!("failed to start tree navigation: {err}")));
+            return Err(internal_error(format!(
+                "failed to start tree navigation: {err}"
+            )));
         }
         Ok(())
     }
@@ -3251,7 +3253,11 @@ impl ThreadRequestProcessor {
         if let Some(side_conversation) = side_conversation {
             thread.side_conversation = Some(thread_side_conversation_to_api(side_conversation));
             if include_turns {
-                populate_thread_turns_from_history(&mut thread, &history_items, /*active_turn*/ None);
+                populate_thread_turns_from_history(
+                    &mut thread,
+                    &history_items,
+                    /*active_turn*/ None,
+                );
             }
         }
 
@@ -3871,7 +3877,9 @@ pub(crate) fn thread_from_stored_thread(
     (thread, history)
 }
 
-fn thread_side_conversation_to_api(side_conversation: SideConversationMeta) -> ThreadSideConversation {
+fn thread_side_conversation_to_api(
+    side_conversation: SideConversationMeta,
+) -> ThreadSideConversation {
     ThreadSideConversation {
         parent_thread_id: side_conversation.parent_thread_id.to_string(),
         parent_turn_id: side_conversation.parent_turn_id,

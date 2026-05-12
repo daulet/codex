@@ -5,6 +5,7 @@ use anyhow::Result;
 use chrono::DateTime;
 use chrono::TimeZone;
 use chrono::Utc;
+use codex_features::Feature;
 use codex_login::CodexAuth;
 use codex_models_manager::client_version_to_whole;
 use codex_models_manager::manager::RefreshStrategy;
@@ -58,6 +59,10 @@ async fn renews_cache_ttl_on_matching_models_etag() -> Result<()> {
 
     let mut builder = test_codex().with_auth(CodexAuth::create_dummy_chatgpt_auth_for_testing());
     builder = builder.with_config(|config| {
+        config
+            .features
+            .disable(Feature::Apps)
+            .expect("test config should allow feature update");
         config.model = Some("gpt-5.2".to_string());
         config.model_provider.request_max_retries = Some(0);
         config.model_provider.stream_max_retries = Some(1);

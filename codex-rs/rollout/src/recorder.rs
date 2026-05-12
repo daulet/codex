@@ -176,32 +176,10 @@ impl RolloutRecorderParams {
         dynamic_tools: Vec<DynamicToolSpec>,
         event_persistence_mode: EventPersistenceMode,
     ) -> Self {
-        Self::new_with_side_conversation(
-            conversation_id,
-            forked_from_id,
-            /*side_conversation*/ None,
-            source,
-            thread_source,
-            base_instructions,
-            dynamic_tools,
-            event_persistence_mode,
-        )
-    }
-
-    pub fn new_with_side_conversation(
-        conversation_id: ThreadId,
-        forked_from_id: Option<ThreadId>,
-        side_conversation: Option<SideConversationMeta>,
-        source: SessionSource,
-        thread_source: Option<ThreadSource>,
-        base_instructions: BaseInstructions,
-        dynamic_tools: Vec<DynamicToolSpec>,
-        event_persistence_mode: EventPersistenceMode,
-    ) -> Self {
         Self::Create {
             conversation_id,
             forked_from_id,
-            side_conversation,
+            side_conversation: None,
             source,
             thread_source,
             base_instructions,

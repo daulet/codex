@@ -1362,6 +1362,7 @@ async fn seed_pathless_store_thread(
         .create_thread(CreateThreadParams {
             thread_id,
             forked_from_id: None,
+            side_conversation: None,
             source: ProtocolSessionSource::Cli,
             thread_source: None,
             base_instructions: BaseInstructions::default(),

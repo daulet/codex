@@ -3148,8 +3148,25 @@ async fn close_agent_submits_shutdown_and_returns_previous_status() {
     assert_eq!(status_after, AgentStatus::NotFound);
 }
 
-#[tokio::test]
-async fn tool_handlers_cascade_close_and_resume_and_keep_explicitly_closed_subtrees_closed() {
+#[test]
+fn tool_handlers_cascade_close_and_resume_and_keep_explicitly_closed_subtrees_closed() {
+    let handle = std::thread::Builder::new()
+        .name("cascade-close-resume-test".to_string())
+        .stack_size(8 * 1024 * 1024)
+        .spawn(|| {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime should build")
+                .block_on(run_cascade_close_resume_test());
+        })
+        .expect("test thread should spawn");
+    if let Err(payload) = handle.join() {
+        std::panic::resume_unwind(payload);
+    }
+}
+
+async fn run_cascade_close_resume_test() {
     let (_session, turn) = make_session_and_context().await;
     let mut config = turn.config.as_ref().clone();
     config.agent_max_depth = 3;
@@ -3176,15 +3193,14 @@ async fn tool_handlers_cascade_close_and_resume_and_keep_explicitly_closed_subtr
     let parent_thread_id = parent.thread_id;
     let parent_session = parent.thread.codex.session.clone();
 
-    let child_spawn_output = SpawnAgentHandler::default()
-        .handle(invocation(
-            parent_session.clone(),
-            parent_session.new_default_turn().await,
-            "spawn_agent",
-            function_payload(json!({"message": "hello child"})),
-        ))
-        .await
-        .expect("child spawn should succeed");
+    let child_spawn_output = Box::pin(SpawnAgentHandler::default().handle(invocation(
+        parent_session.clone(),
+        parent_session.new_default_turn().await,
+        "spawn_agent",
+        function_payload(json!({"message": "hello child"})),
+    )))
+    .await
+    .expect("child spawn should succeed");
     let (child_content, child_success) = expect_text_output(child_spawn_output);
     let child_result: serde_json::Value =
         serde_json::from_str(&child_content).expect("child spawn result should be json");
@@ -3201,15 +3217,14 @@ async fn tool_handlers_cascade_close_and_resume_and_keep_explicitly_closed_subtr
         .await
         .expect("child thread should exist");
     let child_session = child_thread.codex.session.clone();
-    let grandchild_spawn_output = SpawnAgentHandler::default()
-        .handle(invocation(
-            child_session.clone(),
-            child_session.new_default_turn().await,
-            "spawn_agent",
-            function_payload(json!({"message": "hello grandchild"})),
-        ))
-        .await
-        .expect("grandchild spawn should succeed");
+    let grandchild_spawn_output = Box::pin(SpawnAgentHandler::default().handle(invocation(
+        child_session.clone(),
+        child_session.new_default_turn().await,
+        "spawn_agent",
+        function_payload(json!({"message": "hello grandchild"})),
+    )))
+    .await
+    .expect("grandchild spawn should succeed");
     let (grandchild_content, grandchild_success) = expect_text_output(grandchild_spawn_output);
     let grandchild_result: serde_json::Value =
         serde_json::from_str(&grandchild_content).expect("grandchild spawn result should be json");
@@ -3221,15 +3236,14 @@ async fn tool_handlers_cascade_close_and_resume_and_keep_explicitly_closed_subtr
     );
     assert_eq!(grandchild_success, Some(true));
 
-    let close_output = CloseAgentHandler
-        .handle(invocation(
-            parent_session.clone(),
-            parent_session.new_default_turn().await,
-            "close_agent",
-            function_payload(json!({"target": child_thread_id.to_string()})),
-        ))
-        .await
-        .expect("close_agent should close the child subtree");
+    let close_output = Box::pin(CloseAgentHandler.handle(invocation(
+        parent_session.clone(),
+        parent_session.new_default_turn().await,
+        "close_agent",
+        function_payload(json!({"target": child_thread_id.to_string()})),
+    )))
+    .await
+    .expect("close_agent should close the child subtree");
     let (close_content, close_success) = expect_text_output(close_output);
     let close_result: close_agent::CloseAgentResult =
         serde_json::from_str(&close_content).expect("close_agent result should be json");
@@ -3247,15 +3261,14 @@ async fn tool_handlers_cascade_close_and_resume_and_keep_explicitly_closed_subtr
         AgentStatus::NotFound
     );
 
-    let child_resume_output = ResumeAgentHandler
-        .handle(invocation(
-            parent_session.clone(),
-            parent_session.new_default_turn().await,
-            "resume_agent",
-            function_payload(json!({"id": child_thread_id.to_string()})),
-        ))
-        .await
-        .expect("resume_agent should reopen the child subtree");
+    let child_resume_output = Box::pin(ResumeAgentHandler.handle(invocation(
+        parent_session.clone(),
+        parent_session.new_default_turn().await,
+        "resume_agent",
+        function_payload(json!({"id": child_thread_id.to_string()})),
+    )))
+    .await
+    .expect("resume_agent should reopen the child subtree");
     let (child_resume_content, child_resume_success) = expect_text_output(child_resume_output);
     let child_resume_result: resume_agent::ResumeAgentResult =
         serde_json::from_str(&child_resume_content).expect("resume result should be json");
@@ -3273,15 +3286,14 @@ async fn tool_handlers_cascade_close_and_resume_and_keep_explicitly_closed_subtr
         AgentStatus::NotFound
     );
 
-    let close_again_output = CloseAgentHandler
-        .handle(invocation(
-            parent_session.clone(),
-            parent_session.new_default_turn().await,
-            "close_agent",
-            function_payload(json!({"target": child_thread_id.to_string()})),
-        ))
-        .await
-        .expect("close_agent should be repeatable for the child subtree");
+    let close_again_output = Box::pin(CloseAgentHandler.handle(invocation(
+        parent_session.clone(),
+        parent_session.new_default_turn().await,
+        "close_agent",
+        function_payload(json!({"target": child_thread_id.to_string()})),
+    )))
+    .await
+    .expect("close_agent should be repeatable for the child subtree");
     let (close_again_content, close_again_success) = expect_text_output(close_again_output);
     let close_again_result: close_agent::CloseAgentResult =
         serde_json::from_str(&close_again_content)
@@ -3315,15 +3327,14 @@ async fn tool_handlers_cascade_close_and_resume_and_keep_explicitly_closed_subtr
         AgentStatus::NotFound
     );
 
-    let parent_resume_output = ResumeAgentHandler
-        .handle(invocation(
-            operator_session,
-            operator.thread.codex.session.new_default_turn().await,
-            "resume_agent",
-            function_payload(json!({"id": parent_thread_id.to_string()})),
-        ))
-        .await
-        .expect("resume_agent should reopen the parent thread");
+    let parent_resume_output = Box::pin(ResumeAgentHandler.handle(invocation(
+        operator_session,
+        operator.thread.codex.session.new_default_turn().await,
+        "resume_agent",
+        function_payload(json!({"id": parent_thread_id.to_string()})),
+    )))
+    .await
+    .expect("resume_agent should reopen the parent thread");
     let (parent_resume_content, parent_resume_success) = expect_text_output(parent_resume_output);
     let parent_resume_result: resume_agent::ResumeAgentResult =
         serde_json::from_str(&parent_resume_content).expect("parent resume result should be json");

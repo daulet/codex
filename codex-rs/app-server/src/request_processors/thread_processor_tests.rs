@@ -232,6 +232,7 @@ mod thread_processor_behavior_tests {
 
         let turns = reconstruct_thread_turns_for_turns_list(
             &persisted_items,
+            /*side_conversation*/ None,
             ThreadStatus::Idle,
             /*has_live_running_thread*/ false,
             Some(active_turn.clone()),

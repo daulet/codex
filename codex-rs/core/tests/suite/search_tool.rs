@@ -1051,7 +1051,7 @@ async fn tool_search_indexes_only_enabled_non_app_mcp_tools() -> Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn tool_search_uses_non_app_mcp_server_instructions_as_namespace_description() -> Result<()> {
+async fn tool_search_uses_default_namespace_description_for_non_app_mcp_server() -> Result<()> {
     skip_if_no_network!(Ok(()));
 
     let server = start_mock_server().await;
@@ -1133,7 +1133,7 @@ async fn tool_search_uses_non_app_mcp_server_instructions_as_namespace_descripti
         .expect("tool_search should return the rmcp namespace");
     assert_eq!(
         rmcp_namespace.get("description").and_then(Value::as_str),
-        Some("Use these tools to exercise the rmcp test server.")
+        Some("Tools in the mcp__rmcp__ namespace.")
     );
 
     Ok(())
