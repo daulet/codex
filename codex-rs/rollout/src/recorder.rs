@@ -57,6 +57,7 @@ use codex_protocol::protocol::RolloutLine;
 use codex_protocol::protocol::SessionMeta;
 use codex_protocol::protocol::SessionMetaLine;
 use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SideConversationMeta;
 use codex_protocol::protocol::ThreadSource;
 use codex_state::StateRuntime;
 use codex_utils_path as path_utils;
@@ -81,6 +82,7 @@ pub enum RolloutRecorderParams {
     Create {
         conversation_id: ThreadId,
         forked_from_id: Option<ThreadId>,
+        side_conversation: Option<SideConversationMeta>,
         source: SessionSource,
         thread_source: Option<ThreadSource>,
         base_instructions: BaseInstructions,
@@ -161,9 +163,30 @@ impl RolloutRecorderParams {
         base_instructions: BaseInstructions,
         dynamic_tools: Vec<DynamicToolSpec>,
     ) -> Self {
+        Self::new_with_side_conversation(
+            conversation_id,
+            forked_from_id,
+            /*side_conversation*/ None,
+            source,
+            thread_source,
+            base_instructions,
+            dynamic_tools,
+        )
+    }
+
+    pub fn new_with_side_conversation(
+        conversation_id: ThreadId,
+        forked_from_id: Option<ThreadId>,
+        side_conversation: Option<SideConversationMeta>,
+        source: SessionSource,
+        thread_source: Option<ThreadSource>,
+        base_instructions: BaseInstructions,
+        dynamic_tools: Vec<DynamicToolSpec>,
+    ) -> Self {
         Self::Create {
             conversation_id,
             forked_from_id,
+            side_conversation,
             source,
             thread_source,
             base_instructions,
@@ -201,6 +224,7 @@ impl RolloutRecorder {
         allowed_sources: &[SessionSource],
         model_providers: Option<&[String]>,
         cwd_filters: Option<&[PathBuf]>,
+        side_parent_thread_id: Option<&str>,
         default_provider: &str,
         search_term: Option<&str>,
     ) -> std::io::Result<ThreadsPage> {
@@ -214,6 +238,7 @@ impl RolloutRecorder {
             allowed_sources,
             model_providers,
             cwd_filters,
+            side_parent_thread_id,
             default_provider,
             ThreadListArchiveFilter::Active,
             ThreadListRepairMode::ScanAndRepair,
@@ -233,6 +258,7 @@ impl RolloutRecorder {
         allowed_sources: &[SessionSource],
         model_providers: Option<&[String]>,
         cwd_filters: Option<&[PathBuf]>,
+        side_parent_thread_id: Option<&str>,
         default_provider: &str,
         search_term: Option<&str>,
     ) -> std::io::Result<ThreadsPage> {
@@ -246,6 +272,7 @@ impl RolloutRecorder {
             allowed_sources,
             model_providers,
             cwd_filters,
+            side_parent_thread_id,
             default_provider,
             ThreadListArchiveFilter::Active,
             ThreadListRepairMode::StateDbOnly,
@@ -266,6 +293,7 @@ impl RolloutRecorder {
         allowed_sources: &[SessionSource],
         model_providers: Option<&[String]>,
         cwd_filters: Option<&[PathBuf]>,
+        side_parent_thread_id: Option<&str>,
         default_provider: &str,
         search_term: Option<&str>,
     ) -> std::io::Result<ThreadsPage> {
@@ -279,6 +307,7 @@ impl RolloutRecorder {
             allowed_sources,
             model_providers,
             cwd_filters,
+            side_parent_thread_id,
             default_provider,
             ThreadListArchiveFilter::Archived,
             ThreadListRepairMode::ScanAndRepair,
@@ -298,6 +327,7 @@ impl RolloutRecorder {
         allowed_sources: &[SessionSource],
         model_providers: Option<&[String]>,
         cwd_filters: Option<&[PathBuf]>,
+        side_parent_thread_id: Option<&str>,
         default_provider: &str,
         search_term: Option<&str>,
     ) -> std::io::Result<ThreadsPage> {
@@ -311,6 +341,7 @@ impl RolloutRecorder {
             allowed_sources,
             model_providers,
             cwd_filters,
+            side_parent_thread_id,
             default_provider,
             ThreadListArchiveFilter::Archived,
             ThreadListRepairMode::StateDbOnly,
@@ -330,6 +361,7 @@ impl RolloutRecorder {
         allowed_sources: &[SessionSource],
         model_providers: Option<&[String]>,
         cwd_filters: Option<&[PathBuf]>,
+        side_parent_thread_id: Option<&str>,
         default_provider: &str,
         archive_filter: ThreadListArchiveFilter,
         repair_mode: ThreadListRepairMode,
@@ -355,6 +387,7 @@ impl RolloutRecorder {
                 allowed_sources,
                 model_providers,
                 cwd_filters,
+                side_parent_thread_id,
                 archived,
                 search_term,
             )
@@ -463,6 +496,7 @@ impl RolloutRecorder {
             allowed_sources,
             model_providers,
             cwd_filters,
+            side_parent_thread_id,
             archived,
             search_term,
         )
@@ -491,6 +525,7 @@ impl RolloutRecorder {
                     allowed_sources,
                     model_providers,
                     cwd_filters,
+                    side_parent_thread_id,
                     archived,
                     search_term,
                 )
@@ -587,6 +622,7 @@ impl RolloutRecorder {
                     allowed_sources,
                     model_providers,
                     cwd_filter.as_ref().map(std::slice::from_ref),
+                    /*side_parent_thread_id*/ None,
                     /*archived*/ false,
                     /*search_term*/ None,
                 )
@@ -652,6 +688,7 @@ impl RolloutRecorder {
             RolloutRecorderParams::Create {
                 conversation_id,
                 forked_from_id,
+                side_conversation,
                 source,
                 thread_source,
                 base_instructions,
@@ -673,6 +710,7 @@ impl RolloutRecorder {
                 let session_meta = SessionMeta {
                     id: session_id,
                     forked_from_id,
+                    side_conversation,
                     timestamp,
                     cwd: config.cwd().to_path_buf(),
                     originator: originator().value,
@@ -1011,6 +1049,8 @@ fn fill_missing_thread_item_metadata(item: &mut ThreadItem, state_item: ThreadIt
     let ThreadItem {
         path: _state_path,
         thread_id: _state_thread_id,
+        forked_from_id,
+        side_conversation,
         first_user_message,
         preview,
         cwd,
@@ -1031,6 +1071,12 @@ fn fill_missing_thread_item_metadata(item: &mut ThreadItem, state_item: ThreadIt
     }
     if item.preview.is_none() {
         item.preview = preview;
+    }
+    if item.forked_from_id.is_none() {
+        item.forked_from_id = forked_from_id;
+    }
+    if item.side_conversation.is_none() {
+        item.side_conversation = side_conversation;
     }
     if item.cwd.is_none() {
         item.cwd = cwd;
@@ -1674,6 +1720,13 @@ fn thread_item_from_state_metadata(item: codex_state::ThreadMetadata) -> ThreadI
     ThreadItem {
         path: item.rollout_path,
         thread_id: Some(item.id),
+        forked_from_id: None,
+        side_conversation: item.side_parent_thread_id.map(|parent_thread_id| {
+            codex_protocol::protocol::SideConversationMeta {
+                parent_thread_id,
+                parent_turn_id: item.side_parent_turn_id,
+            }
+        }),
         first_user_message: item.first_user_message,
         preview: item.preview,
         cwd: Some(item.cwd),

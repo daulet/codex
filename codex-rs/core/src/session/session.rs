@@ -9,6 +9,7 @@ use codex_protocol::config_types::SERVICE_TIER_DEFAULT_REQUEST_VALUE;
 use codex_protocol::config_types::ServiceTier;
 use codex_protocol::permissions::FileSystemPath;
 use codex_protocol::permissions::FileSystemSpecialPath;
+use codex_protocol::protocol::SideConversationMeta;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnEnvironmentSelection;
 use tokio::sync::Semaphore;
@@ -97,6 +98,7 @@ pub(crate) struct SessionConfiguration {
     pub(super) session_source: SessionSource,
     /// Optional analytics source classification for this thread.
     pub(super) thread_source: Option<ThreadSource>,
+    pub(super) side_conversation: Option<SideConversationMeta>,
     pub(super) dynamic_tools: Vec<DynamicToolSpec>,
     pub(super) persist_extended_history: bool,
     pub(super) inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
@@ -545,6 +547,7 @@ impl Session {
                             CreateThreadParams {
                                 thread_id,
                                 forked_from_id,
+                                side_conversation: session_configuration.side_conversation.clone(),
                                 source: session_source,
                                 thread_source: session_configuration.thread_source,
                                 base_instructions: BaseInstructions {

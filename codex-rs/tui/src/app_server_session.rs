@@ -52,6 +52,7 @@ use codex_app_server_protocol::ThreadCompactStartParams;
 use codex_app_server_protocol::ThreadCompactStartResponse;
 use codex_app_server_protocol::ThreadForkParams;
 use codex_app_server_protocol::ThreadForkResponse;
+use codex_app_server_protocol::ThreadForkSideConversationParams;
 use codex_app_server_protocol::ThreadGoalClearParams;
 use codex_app_server_protocol::ThreadGoalClearResponse;
 use codex_app_server_protocol::ThreadGoalGetParams;
@@ -433,17 +434,49 @@ impl AppServerSession {
     ) -> Result<AppServerStartedThread> {
         let request_id = self.next_request_id();
         let session_config = self.session_config_with_effective_service_tier(&config);
+        let params = thread_fork_params_from_config(
+            session_config,
+            thread_id,
+            self.thread_params_mode(),
+            self.remote_cwd_override.as_deref(),
+        );
         let response: ThreadForkResponse = self
             .client
-            .request_typed(ClientRequest::ThreadFork {
-                request_id,
-                params: thread_fork_params_from_config(
-                    session_config,
-                    thread_id,
-                    self.thread_params_mode(),
-                    self.remote_cwd_override.as_deref(),
-                ),
-            })
+            .request_typed(ClientRequest::ThreadFork { request_id, params })
+            .await
+            .map_err(|err| {
+                bootstrap_request_error("thread/fork failed during TUI bootstrap", err)
+            })?;
+        let fork_parent_title = self
+            .fork_parent_title_from_app_server(response.thread.forked_from_id.as_deref())
+            .await;
+        let mut started =
+            started_thread_from_fork_response(response, &config, self.thread_params_mode()).await?;
+        started.session.fork_parent_title = fork_parent_title;
+        Ok(started)
+    }
+
+    pub(crate) async fn fork_side_thread(
+        &mut self,
+        config: Config,
+        thread_id: ThreadId,
+    ) -> Result<AppServerStartedThread> {
+        let request_id = self.next_request_id();
+        let session_config = self.session_config_with_effective_service_tier(&config);
+        let mut params = thread_fork_params_from_config(
+            session_config,
+            thread_id,
+            self.thread_params_mode(),
+            self.remote_cwd_override.as_deref(),
+        );
+        params.ephemeral = false;
+        // Let app-server snapshot the active parent leaf at fork time.
+        params.side_conversation = Some(ThreadForkSideConversationParams {
+            parent_turn_id: None,
+        });
+        let response: ThreadForkResponse = self
+            .client
+            .request_typed(ClientRequest::ThreadFork { request_id, params })
             .await
             .map_err(|err| {
                 bootstrap_request_error("thread/fork failed during TUI bootstrap", err)
@@ -2250,6 +2283,7 @@ mod tests {
                 id: thread_id.to_string(),
                 session_id: ThreadId::new().to_string(),
                 forked_from_id: Some(forked_from_id.to_string()),
+                side_conversation: None,
                 preview: "hello".to_string(),
                 ephemeral: false,
                 model_provider: "openai".to_string(),

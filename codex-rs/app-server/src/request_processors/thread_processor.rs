@@ -16,7 +16,13 @@ struct ThreadListFilters {
     archived: bool,
     cwd_filters: Option<Vec<PathBuf>>,
     search_term: Option<String>,
+    side_parent_thread_id: Option<String>,
     use_state_db_only: bool,
+}
+
+struct ThreadTurnsListHistory {
+    items: Vec<RolloutItem>,
+    side_conversation: Option<SideConversationMeta>,
 }
 
 fn collect_resume_override_mismatches(
@@ -1856,6 +1862,7 @@ impl ThreadRequestProcessor {
             cwd,
             use_state_db_only,
             search_term,
+            side_parent_thread_id,
         } = params;
         let cwd_filters = normalize_thread_list_cwd_filters(cwd)?;
 
@@ -1880,6 +1887,7 @@ impl ThreadRequestProcessor {
                     archived: archived.unwrap_or(false),
                     cwd_filters,
                     search_term,
+                    side_parent_thread_id,
                     use_state_db_only,
                 },
             )
@@ -2081,8 +2089,11 @@ impl ThreadRequestProcessor {
                 let (mut thread, history) =
                     thread_from_stored_thread(stored_thread, fallback_provider, &self.config.cwd);
                 if include_turns && let Some(history) = history {
-                    let active_branch_items = codex_rollout::active_branch_items(&history.items);
-                    thread.turns = build_api_turns_from_rollout_items(&active_branch_items);
+                    populate_thread_turns_from_history(
+                        &mut thread,
+                        &history.items,
+                        /*active_turn*/ None,
+                    );
                 }
                 Ok(Some(thread))
             }
@@ -2148,8 +2159,7 @@ impl ThreadRequestProcessor {
                 .load_history(/*include_archived*/ true)
                 .await
                 .map_err(|err| thread_read_history_load_error(thread_id, err))?;
-            let active_branch_items = codex_rollout::active_branch_items(&history.items);
-            thread.turns = build_api_turns_from_rollout_items(&active_branch_items);
+            populate_thread_turns_from_history(thread, &history.items, /*active_turn*/ None);
         }
 
         Ok(())
@@ -2171,7 +2181,7 @@ impl ThreadRequestProcessor {
         let thread_uuid = ThreadId::from_string(&thread_id)
             .map_err(|err| invalid_request(format!("invalid thread id: {err}")))?;
 
-        let items = self
+        let history = self
             .load_thread_turns_list_history(thread_uuid)
             .await
             .map_err(thread_read_view_error)?;
@@ -2196,7 +2206,8 @@ impl ThreadRequestProcessor {
             None
         };
         let mut turns = reconstruct_thread_turns_for_turns_list(
-            &items,
+            &history.items,
+            history.side_conversation.as_ref(),
             self.thread_watch_manager
                 .loaded_status_for_thread(&thread_uuid.to_string())
                 .await,
@@ -2254,7 +2265,7 @@ impl ThreadRequestProcessor {
     async fn load_thread_turns_list_history(
         &self,
         thread_id: ThreadId,
-    ) -> Result<Vec<RolloutItem>, ThreadReadViewError> {
+    ) -> Result<ThreadTurnsListHistory, ThreadReadViewError> {
         match self
             .thread_store
             .read_thread(StoreReadThreadParams {
@@ -2265,12 +2276,16 @@ impl ThreadRequestProcessor {
             .await
         {
             Ok(stored_thread) => {
+                let side_conversation = stored_thread.side_conversation.clone();
                 let history = stored_thread.history.ok_or_else(|| {
                     ThreadReadViewError::Internal(format!(
                         "thread store did not return history for thread {thread_id}"
                     ))
                 })?;
-                return Ok(history.items);
+                return Ok(ThreadTurnsListHistory {
+                    items: history.items,
+                    side_conversation,
+                });
             }
             Err(ThreadStoreError::InvalidRequest { message })
                 if message == format!("no rollout found for thread id {thread_id}") => {}
@@ -2304,7 +2319,10 @@ impl ThreadRequestProcessor {
         thread
             .load_history(/*include_archived*/ true)
             .await
-            .map(|history| history.items)
+            .map(|history| ThreadTurnsListHistory {
+                items: history.items,
+                side_conversation: None,
+            })
             .map_err(|err| thread_turns_list_history_load_error(thread_id, err))
     }
 
@@ -3082,6 +3100,7 @@ impl ThreadRequestProcessor {
             developer_instructions,
             ephemeral,
             thread_source,
+            side_conversation,
             exclude_turns,
             persist_extended_history,
         } = params;
@@ -3089,6 +3108,11 @@ impl ThreadRequestProcessor {
         if sandbox.is_some() && permissions.is_some() {
             return Err(invalid_request(
                 "`permissions` cannot be combined with `sandbox`",
+            ));
+        }
+        if ephemeral && side_conversation.is_some() {
+            return Err(invalid_request(
+                "`sideConversation` forks must be persisted; set `ephemeral` to false",
             ));
         }
         if persist_extended_history {
@@ -3110,6 +3134,14 @@ impl ThreadRequestProcessor {
                 ))
             })?;
         let history_cwd = Some(source_thread.cwd.clone());
+        let side_conversation = match side_conversation {
+            Some(side_conversation) => Some(side_conversation_meta_for_fork(
+                source_thread_id,
+                &history_items,
+                side_conversation.parent_turn_id,
+            )?),
+            None => None,
+        };
 
         // Persist Windows sandbox mode.
         let mut cli_overrides = cli_overrides.unwrap_or_default();
@@ -3165,7 +3197,7 @@ impl ThreadRequestProcessor {
             ..
         } = self
             .thread_manager
-            .fork_thread_from_history(
+            .fork_thread_from_history_with_side_conversation(
                 ForkSnapshot::Interrupted,
                 config,
                 InitialHistory::Resumed(ResumedHistory {
@@ -3175,6 +3207,7 @@ impl ThreadRequestProcessor {
                 }),
                 thread_source.map(Into::into),
                 /*persist_extended_history*/ false,
+                side_conversation.clone(),
                 self.request_trace_context(&request_id).await,
             )
             .await
@@ -3243,6 +3276,16 @@ impl ThreadRequestProcessor {
             .await
             .thread_source
             .map(Into::into);
+        if let Some(side_conversation) = side_conversation {
+            thread.side_conversation = Some(thread_side_conversation_to_api(side_conversation));
+            if include_turns && session_configured.rollout_path.is_none() {
+                populate_thread_turns_from_history(
+                    &mut thread,
+                    &history_items,
+                    /*active_turn*/ None,
+                );
+            }
+        }
 
         self.thread_watch_manager
             .upsert_thread_silently(thread.clone())
@@ -3363,6 +3406,7 @@ impl ThreadRequestProcessor {
             archived,
             cwd_filters,
             search_term,
+            side_parent_thread_id,
             use_state_db_only,
         } = filters;
         let mut cursor_obj = cursor;
@@ -3402,6 +3446,7 @@ impl ThreadRequestProcessor {
                     cwd_filters: cwd_filters.clone(),
                     archived,
                     search_term: search_term.clone(),
+                    side_parent_thread_id: side_parent_thread_id.clone(),
                     use_state_db_only,
                 })
                 .await
@@ -3595,6 +3640,7 @@ fn parse_thread_turns_cursor(cursor: &str) -> Result<ThreadTurnsCursor, JSONRPCE
 
 fn reconstruct_thread_turns_for_turns_list(
     items: &[RolloutItem],
+    side_conversation: Option<&SideConversationMeta>,
     loaded_status: ThreadStatus,
     has_live_running_thread: bool,
     active_turn: Option<Turn>,
@@ -3603,7 +3649,14 @@ fn reconstruct_thread_turns_for_turns_list(
         || active_turn
             .as_ref()
             .is_some_and(|turn| matches!(turn.status, TurnStatus::InProgress));
-    let active_branch_items = codex_rollout::active_branch_items(items);
+    let visible_items = match side_conversation {
+        Some(side_conversation) => visible_rollout_items_after_side_boundary(
+            items,
+            side_conversation.parent_turn_id.as_deref(),
+        ),
+        None => items.to_vec(),
+    };
+    let active_branch_items = codex_rollout::active_branch_items(&visible_items);
     let mut turns = build_api_turns_from_rollout_items(&active_branch_items);
     normalize_thread_turns_status(&mut turns, loaded_status, has_live_in_progress_turn);
     if let Some(active_turn) = active_turn {
@@ -3818,10 +3871,14 @@ pub(crate) fn thread_from_stored_thread(
     );
     let history = thread.history;
     let thread_id = thread.thread_id.to_string();
+    let side_conversation = thread
+        .side_conversation
+        .map(thread_side_conversation_to_api);
     let thread = Thread {
         id: thread_id.clone(),
         session_id: thread_id,
         forked_from_id: thread.forked_from_id.map(|id| id.to_string()),
+        side_conversation,
         preview: thread.preview,
         ephemeral: false,
         model_provider: if thread.model_provider.is_empty() {
@@ -3844,6 +3901,51 @@ pub(crate) fn thread_from_stored_thread(
         turns: Vec::new(),
     };
     (thread, history)
+}
+
+fn thread_side_conversation_to_api(
+    side_conversation: SideConversationMeta,
+) -> ThreadSideConversation {
+    ThreadSideConversation {
+        parent_thread_id: side_conversation.parent_thread_id.to_string(),
+        parent_turn_id: side_conversation.parent_turn_id,
+    }
+}
+
+fn side_conversation_meta_for_fork(
+    source_thread_id: ThreadId,
+    history_items: &[RolloutItem],
+    requested_parent_turn_id: Option<String>,
+) -> Result<SideConversationMeta, JSONRPCErrorError> {
+    let thread_tree = build_thread_tree(history_items);
+    let parent_turn_id = match requested_parent_turn_id.and_then(non_empty_string) {
+        Some(parent_turn_id) => {
+            if thread_tree
+                .turns
+                .iter()
+                .any(|turn| turn.turn_id == parent_turn_id)
+            {
+                parent_turn_id
+            } else {
+                return Err(invalid_request(
+                    "`sideConversation.parentTurnId` must identify a turn in the source thread",
+                ));
+            }
+        }
+        None => thread_tree.active_leaf_turn_id.ok_or_else(|| {
+            invalid_request(
+                "`sideConversation` forks require a source thread with at least one turn",
+            )
+        })?,
+    };
+    Ok(SideConversationMeta {
+        parent_thread_id: source_thread_id,
+        parent_turn_id: Some(parent_turn_id),
+    })
+}
+
+fn non_empty_string(value: String) -> Option<String> {
+    (!value.trim().is_empty()).then_some(value)
 }
 
 fn summary_from_stored_thread(
@@ -4030,6 +4132,7 @@ fn build_thread_from_snapshot(
         id: thread_id.to_string(),
         session_id,
         forked_from_id: None,
+        side_conversation: None,
         preview: String::new(),
         ephemeral: config_snapshot.ephemeral,
         model_provider: config_snapshot.model_provider_id.clone(),

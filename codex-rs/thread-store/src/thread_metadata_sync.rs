@@ -77,6 +77,7 @@ impl ThreadMetadataSync {
             git_info: git_info.map(git_info_patch_from_observation),
             memory_mode: Some(params.metadata.memory_mode),
             dynamic_tools,
+            side_conversation: params.side_conversation.clone(),
             ..Default::default()
         };
         Self {
@@ -231,6 +232,9 @@ impl ThreadMetadataSync {
                     if let Some(dynamic_tools) = meta_line.meta.dynamic_tools.clone() {
                         update.dynamic_tools = Some(dynamic_tools);
                     }
+                    if let Some(side_conversation) = meta_line.meta.side_conversation.clone() {
+                        update.side_conversation = Some(side_conversation);
+                    }
                 }
                 RolloutItem::TurnContext(turn_ctx) => {
                     if !self.cwd_seen && !turn_ctx.cwd.as_os_str().is_empty() {
@@ -363,6 +367,7 @@ fn update_has_metadata_facts(update: &ThreadMetadataPatch) -> bool {
         || update.sandbox_policy.is_some()
         || update.token_usage.is_some()
         || update.first_user_message.is_some()
+        || update.side_conversation.is_some()
         || update.git_info.is_some()
         || update.memory_mode.is_some()
         || update.dynamic_tools.is_some()
@@ -382,6 +387,7 @@ mod tests {
     use codex_protocol::protocol::SessionMeta;
     use codex_protocol::protocol::SessionMetaLine;
     use codex_protocol::protocol::SessionSource;
+    use codex_protocol::protocol::SideConversationMeta;
     use codex_protocol::protocol::ThreadGoal;
     use codex_protocol::protocol::ThreadGoalStatus;
     use codex_protocol::protocol::ThreadGoalUpdatedEvent;
@@ -426,6 +432,25 @@ mod tests {
 
         sync.mark_pending_update_applied(&update);
         assert!(sync.take_pending_update().is_none());
+    }
+
+    #[test]
+    fn resume_history_keeps_side_conversation_metadata_pending_until_applied() {
+        let thread_id = ThreadId::new();
+        let side_conversation = SideConversationMeta {
+            parent_thread_id: ThreadId::new(),
+            parent_turn_id: Some("turn-1".to_string()),
+        };
+        let mut meta_line = session_meta(thread_id);
+        meta_line.meta.side_conversation = Some(side_conversation.clone());
+
+        let sync = ThreadMetadataSync::for_resume(&resume_params(
+            thread_id,
+            vec![RolloutItem::SessionMeta(meta_line)],
+        ));
+
+        let update = sync.take_pending_update().expect("pending metadata update");
+        assert_eq!(update.patch.side_conversation, Some(side_conversation));
     }
 
     #[test]

@@ -210,6 +210,7 @@ async fn thread_unarchive_preserves_pathless_store_metadata() -> Result<()> {
         .create_thread(CreateThreadParams {
             thread_id,
             forked_from_id: Some(parent_thread_id),
+            side_conversation: None,
             source: SessionSource::Cli,
             thread_source: None,
             base_instructions: BaseInstructions::default(),

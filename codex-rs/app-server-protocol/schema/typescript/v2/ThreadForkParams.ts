@@ -5,6 +5,7 @@ import type { JsonValue } from "../serde_json/JsonValue";
 import type { ApprovalsReviewer } from "./ApprovalsReviewer";
 import type { AskForApproval } from "./AskForApproval";
 import type { SandboxMode } from "./SandboxMode";
+import type { ThreadForkSideConversationParams } from "./ThreadForkSideConversationParams";
 import type { ThreadSource } from "./ThreadSource";
 
 /**
@@ -27,4 +28,9 @@ model?: string | null, modelProvider?: string | null, serviceTier?: string | nul
 approvalsReviewer?: ApprovalsReviewer | null, sandbox?: SandboxMode | null, config?: { [key in string]?: JsonValue } | null, baseInstructions?: string | null, developerInstructions?: string | null, ephemeral?: boolean, /**
  * Optional client-supplied analytics source classification for this forked thread.
  */
-threadSource?: ThreadSource | null};
+threadSource?: ThreadSource | null, /**
+ * Marks this fork as a persisted side conversation attached to the source
+ * thread. When `parentTurnId` is omitted, the server attaches the side
+ * thread to the source thread's current tree leaf.
+ */
+sideConversation?: ThreadForkSideConversationParams | null};

@@ -4,5 +4,7 @@ expression: rows
 ---
 root -- Before the first user turn
 first -- turn turn-1 - 2 branches - active path
+|- Side: quick clarification -- side side-thr
 |- second B -- turn turn-3b - active path
+|  `- Side: inspect a detail -- side side-thr
 `- second A -- turn turn-2a

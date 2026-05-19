@@ -1013,6 +1013,7 @@ mod tests {
         CreateThreadParams {
             thread_id,
             forked_from_id: None,
+            side_conversation: None,
             source: SessionSource::Exec,
             thread_source: None,
             base_instructions: BaseInstructions::default(),

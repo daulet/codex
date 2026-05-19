@@ -3136,6 +3136,17 @@
             "null"
           ]
         },
+        "sideConversation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadForkSideConversationParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Marks this fork as a persisted side conversation attached to the source thread. When `parentTurnId` is omitted, the server attaches the side thread to the source thread's current tree leaf."
+        },
         "threadId": {
           "type": "string"
         },
@@ -3154,6 +3165,17 @@
       "required": [
         "threadId"
       ],
+      "type": "object"
+    },
+    "ThreadForkSideConversationParams": {
+      "properties": {
+        "parentTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "ThreadGoalClearParams": {
@@ -3301,6 +3323,13 @@
         },
         "searchTerm": {
           "description": "Optional substring filter for the extracted thread title.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "sideParentThreadId": {
+          "description": "Optional side-conversation parent thread filter. When set, only side conversations forked directly from this thread are returned.",
           "type": [
             "string",
             "null"

@@ -865,6 +865,18 @@
           "description": "Session id shared by threads that belong to the same session tree.",
           "type": "string"
         },
+        "sideConversation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadSideConversation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Parent metadata when this thread was created as a persisted side conversation."
+        },
         "source": {
           "allOf": [
             {
@@ -1596,6 +1608,23 @@
           "type": "object"
         }
       ]
+    },
+    "ThreadSideConversation": {
+      "properties": {
+        "parentThreadId": {
+          "type": "string"
+        },
+        "parentTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "parentThreadId"
+      ],
+      "type": "object"
     },
     "ThreadSource": {
       "enum": [
