@@ -51,4 +51,9 @@ useStateDbOnly?: boolean,
 /**
  * Optional substring filter for the extracted thread title.
  */
-searchTerm?: string | null, };
+searchTerm?: string | null,
+/**
+ * Optional side-conversation parent thread filter. When set, only side
+ * conversations forked directly from this thread are returned.
+ */
+sideParentThreadId?: string | null, };

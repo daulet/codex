@@ -96,6 +96,13 @@
         "null"
       ]
     },
+    "sideParentThreadId": {
+      "description": "Optional side-conversation parent thread filter. When set, only side conversations forked directly from this thread are returned.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "sortDirection": {
       "anyOf": [
         {

@@ -242,6 +242,7 @@ async fn read_thread_from_rollout_path(
         {
             thread.model_provider = model_provider;
         }
+        thread.side_conversation = meta_line.meta.side_conversation;
     }
     if let Ok(Some(title)) =
         find_thread_name_by_id(store.config.codex_home.as_path(), &thread.thread_id).await
@@ -294,10 +295,20 @@ async fn stored_thread_from_sqlite_metadata(
         .unwrap_or_default();
     let permission_profile =
         permission_profile_from_metadata_value(&metadata.sandbox_policy, metadata.cwd.as_path());
+    let side_conversation_from_rollout = session_meta
+        .as_ref()
+        .and_then(|meta| meta.side_conversation.clone());
+    let side_conversation_from_metadata = metadata.side_parent_thread_id.map(|parent_thread_id| {
+        codex_protocol::protocol::SideConversationMeta {
+            parent_thread_id,
+            parent_turn_id: metadata.side_parent_turn_id.clone(),
+        }
+    });
     StoredThread {
         thread_id: metadata.id,
         rollout_path: Some(metadata.rollout_path),
         forked_from_id,
+        side_conversation: side_conversation_from_metadata.or(side_conversation_from_rollout),
         preview,
         name,
         model_provider: if metadata.model_provider.is_empty() {
@@ -361,6 +372,7 @@ fn stored_thread_from_meta_line(
         thread_id: meta_line.meta.id,
         rollout_path: Some(path),
         forked_from_id: meta_line.meta.forked_from_id,
+        side_conversation: meta_line.meta.side_conversation,
         preview: String::new(),
         name: None,
         model_provider: meta_line

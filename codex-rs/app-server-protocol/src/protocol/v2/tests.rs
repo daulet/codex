@@ -270,6 +270,19 @@ fn thread_list_params_accepts_state_db_only_flag() {
 }
 
 #[test]
+fn thread_list_params_accepts_side_parent_thread_filter() {
+    let params = serde_json::from_value::<ThreadListParams>(json!({
+        "sideParentThreadId": "thread-parent",
+    }))
+    .expect("side parent thread filter should deserialize");
+
+    assert_eq!(
+        params.side_parent_thread_id.as_deref(),
+        Some("thread-parent")
+    );
+}
+
+#[test]
 fn collab_agent_state_maps_interrupted_status() {
     assert_eq!(
         CollabAgentState::from(CoreAgentStatus::Interrupted),

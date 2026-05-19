@@ -141,7 +141,7 @@ pub(crate) enum AppEvent {
     /// Switch the active thread to the selected agent.
     SelectAgentThread(ThreadId),
 
-    /// Fork the current thread into a transient side conversation.
+    /// Fork the current thread into a persisted side conversation.
     StartSide {
         parent_thread_id: ThreadId,
         user_message: Option<UserMessage>,

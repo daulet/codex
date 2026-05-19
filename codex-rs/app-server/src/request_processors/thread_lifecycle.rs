@@ -739,12 +739,42 @@ pub(crate) fn populate_thread_turns_from_history(
     items: &[RolloutItem],
     active_turn: Option<&Turn>,
 ) {
-    let active_branch_items = codex_rollout::active_branch_items(items);
+    let visible_items = visible_rollout_items_for_thread(thread, items);
+    let active_branch_items = codex_rollout::active_branch_items(&visible_items);
     let mut turns = build_api_turns_from_rollout_items(&active_branch_items);
     if let Some(active_turn) = active_turn {
         merge_turn_history_with_active_turn(&mut turns, active_turn.clone());
     }
     thread.turns = turns;
+}
+
+pub(crate) fn visible_rollout_items_for_thread(
+    thread: &Thread,
+    items: &[RolloutItem],
+) -> Vec<RolloutItem> {
+    let Some(side_conversation) = thread.side_conversation.as_ref() else {
+        return items.to_vec();
+    };
+    visible_rollout_items_after_side_boundary(items, side_conversation.parent_turn_id.as_deref())
+}
+
+pub(crate) fn visible_rollout_items_after_side_boundary(
+    items: &[RolloutItem],
+    parent_turn_id: Option<&str>,
+) -> Vec<RolloutItem> {
+    let Some(parent_turn_id) = parent_turn_id else {
+        return Vec::new();
+    };
+    let Some(start_index) = build_thread_tree(items)
+        .turns
+        .into_iter()
+        .find(|turn| turn.turn_id == parent_turn_id)
+        .map(|turn| turn.rollout_end_index.min(items.len()))
+    else {
+        return Vec::new();
+    };
+
+    items[start_index..].to_vec()
 }
 
 pub(super) async fn resolve_pending_server_request(

@@ -85,6 +85,7 @@ async fn state_db_init_backfills_before_returning() -> anyhow::Result<()> {
         meta: SessionMeta {
             id: thread_id,
             forked_from_id: None,
+            side_conversation: None,
             timestamp: "2026-01-27T12:34:56Z".to_string(),
             cwd: home.path().to_path_buf(),
             originator: "test".to_string(),
@@ -542,6 +543,7 @@ async fn list_threads_db_disabled_does_not_skip_paginated_items() -> std::io::Re
         &[],
         /*model_providers*/ None,
         /*cwd_filters*/ None,
+        /*side_parent_thread_id*/ None,
         default_provider.as_str(),
         /*search_term*/ None,
     )
@@ -560,6 +562,7 @@ async fn list_threads_db_disabled_does_not_skip_paginated_items() -> std::io::Re
         &[],
         /*model_providers*/ None,
         /*cwd_filters*/ None,
+        /*side_parent_thread_id*/ None,
         default_provider.as_str(),
         /*search_term*/ None,
     )
@@ -621,6 +624,7 @@ async fn list_threads_db_enabled_drops_missing_rollout_paths() -> std::io::Resul
         &[],
         /*model_providers*/ None,
         /*cwd_filters*/ None,
+        /*side_parent_thread_id*/ None,
         default_provider.as_str(),
         /*search_term*/ None,
     )
@@ -687,6 +691,7 @@ async fn list_threads_db_enabled_repairs_stale_rollout_paths() -> std::io::Resul
         &[],
         /*model_providers*/ None,
         /*cwd_filters*/ None,
+        /*side_parent_thread_id*/ None,
         default_provider.as_str(),
         /*search_term*/ None,
     )
@@ -760,6 +765,7 @@ async fn list_threads_state_db_only_skips_jsonl_repair_scan() -> std::io::Result
         &[],
         /*model_providers*/ None,
         /*cwd_filters*/ Some(cwd_filters.as_slice()),
+        /*side_parent_thread_id*/ None,
         config.model_provider_id.as_str(),
         /*search_term*/ None,
     )
@@ -776,6 +782,7 @@ async fn list_threads_state_db_only_skips_jsonl_repair_scan() -> std::io::Result
         &[],
         /*model_providers*/ None,
         /*cwd_filters*/ Some(cwd_filters.as_slice()),
+        /*side_parent_thread_id*/ None,
         config.model_provider_id.as_str(),
         /*search_term*/ None,
     )
@@ -792,6 +799,7 @@ async fn list_threads_state_db_only_skips_jsonl_repair_scan() -> std::io::Result
         &[],
         /*model_providers*/ None,
         /*cwd_filters*/ Some(cwd_filters.as_slice()),
+        /*side_parent_thread_id*/ None,
         config.model_provider_id.as_str(),
         /*search_term*/ None,
     )
@@ -851,6 +859,7 @@ async fn list_threads_default_filter_returns_filesystem_scan_results() -> std::i
         &[],
         /*model_providers*/ None,
         /*cwd_filters*/ Some(cwd_filters.as_slice()),
+        /*side_parent_thread_id*/ None,
         config.model_provider_id.as_str(),
         /*search_term*/ None,
     )
@@ -867,6 +876,7 @@ async fn list_threads_default_filter_returns_filesystem_scan_results() -> std::i
         &[],
         /*model_providers*/ None,
         /*cwd_filters*/ Some(cwd_filters.as_slice()),
+        /*side_parent_thread_id*/ None,
         config.model_provider_id.as_str(),
         /*search_term*/ None,
     )
@@ -883,6 +893,7 @@ async fn list_threads_default_filter_returns_filesystem_scan_results() -> std::i
         &[],
         /*model_providers*/ None,
         /*cwd_filters*/ Some(cwd_filters.as_slice()),
+        /*side_parent_thread_id*/ None,
         config.model_provider_id.as_str(),
         /*search_term*/ None,
     )
@@ -943,6 +954,7 @@ async fn list_threads_metadata_filter_overlays_state_db_list_metadata() -> std::
         &[SessionSource::Cli],
         /*model_providers*/ None,
         /*cwd_filters*/ None,
+        /*side_parent_thread_id*/ None,
         config.model_provider_id.as_str(),
         /*search_term*/ None,
     )
@@ -967,6 +979,8 @@ fn fill_missing_thread_item_metadata_preserves_identity_and_prefers_state_git_fi
     let mut item = ThreadItem {
         path: filesystem_path.clone(),
         thread_id: Some(filesystem_thread_id),
+        forked_from_id: None,
+        side_conversation: None,
         first_user_message: Some("filesystem message".to_string()),
         preview: Some("filesystem preview".to_string()),
         cwd: None,
@@ -984,6 +998,8 @@ fn fill_missing_thread_item_metadata_preserves_identity_and_prefers_state_git_fi
     let state_item = ThreadItem {
         path: state_path,
         thread_id: Some(state_thread_id),
+        forked_from_id: None,
+        side_conversation: None,
         first_user_message: Some("state message".to_string()),
         preview: Some("state preview".to_string()),
         cwd: Some(PathBuf::from("/tmp/state-cwd")),
@@ -1074,6 +1090,7 @@ async fn list_threads_search_repairs_stale_state_db_hits_before_returning() -> s
         &[],
         /*model_providers*/ None,
         /*cwd_filters*/ None,
+        /*side_parent_thread_id*/ None,
         config.model_provider_id.as_str(),
         Some("needle"),
     )
@@ -1090,6 +1107,7 @@ async fn list_threads_search_repairs_stale_state_db_hits_before_returning() -> s
         &[],
         /*model_providers*/ None,
         /*cwd_filters*/ None,
+        /*side_parent_thread_id*/ None,
         config.model_provider_id.as_str(),
         Some("needle"),
     )
@@ -1106,6 +1124,7 @@ async fn list_threads_search_repairs_stale_state_db_hits_before_returning() -> s
         &[],
         /*model_providers*/ None,
         /*cwd_filters*/ None,
+        /*side_parent_thread_id*/ None,
         config.model_provider_id.as_str(),
         Some("needle"),
     )

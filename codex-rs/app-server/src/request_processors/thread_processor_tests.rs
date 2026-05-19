@@ -163,6 +163,42 @@ mod thread_processor_behavior_tests {
     }
 
     #[test]
+    fn side_conversation_meta_for_fork_rejects_missing_parent_turn() {
+        let err =
+            side_conversation_meta_for_fork(ThreadId::new(), &[], /*parent_turn_id*/ None)
+                .expect_err("side conversation without a parent turn should fail");
+
+        assert_eq!(
+            err.message,
+            "`sideConversation` forks require a source thread with at least one turn"
+        );
+    }
+
+    #[test]
+    fn side_conversation_meta_for_fork_rejects_unknown_parent_turn() {
+        let history_items = vec![RolloutItem::EventMsg(EventMsg::UserMessage(
+            codex_protocol::protocol::UserMessageEvent {
+                message: "persisted".to_string(),
+                images: None,
+                local_images: Vec::new(),
+                text_elements: Vec::new(),
+            },
+        ))];
+
+        let err = side_conversation_meta_for_fork(
+            ThreadId::new(),
+            &history_items,
+            Some("missing-turn".to_string()),
+        )
+        .expect_err("unknown parent turn should fail");
+
+        assert_eq!(
+            err.message,
+            "`sideConversation.parentTurnId` must identify a turn in the source thread"
+        );
+    }
+
+    #[test]
     fn validate_dynamic_tools_accepts_responses_compatible_identifiers() {
         let tools = vec![ApiDynamicToolSpec {
             namespace: Some("Codex-App_2".to_string()),
@@ -241,6 +277,7 @@ mod thread_processor_behavior_tests {
 
         let turns = reconstruct_thread_turns_for_turns_list(
             &persisted_items,
+            /*side_conversation*/ None,
             ThreadStatus::Idle,
             /*has_live_running_thread*/ false,
             Some(active_turn.clone()),
@@ -395,6 +432,7 @@ mod thread_processor_behavior_tests {
             thread_id,
             rollout_path: Some(PathBuf::from("/tmp/thread.jsonl")),
             forked_from_id: None,
+            side_conversation: None,
             preview: "preview".to_string(),
             name: None,
             model_provider: "openai".to_string(),

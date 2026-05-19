@@ -688,6 +688,7 @@ async fn lookup_session_target_by_name_with_app_server(
                 cwd: None,
                 use_state_db_only: false,
                 search_term: Some(name.to_string()),
+                side_parent_thread_id: None,
             })
             .await?;
         if let Some(thread) = response
@@ -780,6 +781,7 @@ fn latest_session_lookup_params(
         cwd: cwd_filter.map(|cwd| ThreadListCwdFilter::One(cwd.to_string_lossy().to_string())),
         use_state_db_only: false,
         search_term: None,
+        side_parent_thread_id: None,
     }
 }
 

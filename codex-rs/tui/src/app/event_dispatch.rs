@@ -208,9 +208,25 @@ impl App {
                 match codex_rollout::RolloutRecorder::load_rollout_items(rollout_path.as_path())
                     .await
                 {
-                    Ok((rollout_items, _thread_id, _parse_errors)) => {
-                        let tree = codex_rollout::build_thread_tree(&rollout_items);
-                        if tree.turns.is_empty() {
+                    Ok((rollout_items, rollout_thread_id, _parse_errors)) => {
+                        let mut tree = codex_rollout::build_thread_tree(&rollout_items);
+                        if let Some(parent_thread_id) =
+                            self.chat_widget.thread_id().or(rollout_thread_id)
+                        {
+                            match load_side_branches_for_thread_tree(app_server, parent_thread_id)
+                                .await
+                            {
+                                Ok(side_branches) => {
+                                    tree.side_branches = side_branches;
+                                }
+                                Err(err) => {
+                                    self.chat_widget.add_error_message(format!(
+                                        "Failed to load side branches for /tree: {err}"
+                                    ));
+                                }
+                            }
+                        }
+                        if tree.turns.is_empty() && tree.side_branches.is_empty() {
                             self.chat_widget.add_info_message(
                                 "No completed turns are available yet.".to_string(),
                                 /*hint*/ None,
@@ -2318,4 +2334,53 @@ impl App {
             }
         }
     }
+}
+
+async fn load_side_branches_for_thread_tree(
+    app_server: &mut AppServerSession,
+    parent_thread_id: ThreadId,
+) -> Result<Vec<codex_rollout::ThreadTreeSideBranch>> {
+    const PAGE_LIMIT: u32 = 100;
+
+    let parent_thread_id = parent_thread_id.to_string();
+    let mut cursor = None;
+    let mut branches = Vec::new();
+
+    loop {
+        let response = app_server
+            .thread_list(codex_app_server_protocol::ThreadListParams {
+                cursor,
+                limit: Some(PAGE_LIMIT),
+                sort_key: Some(codex_app_server_protocol::ThreadSortKey::UpdatedAt),
+                sort_direction: Some(codex_app_server_protocol::SortDirection::Desc),
+                model_providers: Some(Vec::new()),
+                source_kinds: None,
+                archived: Some(false),
+                cwd: None,
+                use_state_db_only: true,
+                search_term: None,
+                side_parent_thread_id: Some(parent_thread_id.clone()),
+            })
+            .await?;
+
+        for thread in response.data {
+            let Some(side_conversation) = thread.side_conversation else {
+                continue;
+            };
+            branches.push(codex_rollout::ThreadTreeSideBranch {
+                thread_id: thread.id,
+                parent_turn_id: side_conversation.parent_turn_id,
+                title: thread.name,
+                preview: (!thread.preview.trim().is_empty()).then_some(thread.preview),
+                updated_at: Some(thread.updated_at),
+            });
+        }
+
+        cursor = response.next_cursor;
+        if cursor.is_none() {
+            break;
+        }
+    }
+
+    Ok(branches)
 }

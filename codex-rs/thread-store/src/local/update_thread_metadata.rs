@@ -220,6 +220,10 @@ async fn apply_metadata_update(
                 builder.cwd = patch.cwd.clone().map(normalize_cwd).unwrap_or_default();
                 builder.cli_version = patch.cli_version.clone();
                 let mut metadata = builder.build(store.config.default_model_provider_id.as_str());
+                if let Some(side_conversation) = patch.side_conversation.clone() {
+                    metadata.side_parent_thread_id = Some(side_conversation.parent_thread_id);
+                    metadata.side_parent_turn_id = side_conversation.parent_turn_id;
+                }
                 if rollout_path_archived {
                     metadata.archived_at = Some(metadata.updated_at);
                 }
@@ -284,6 +288,10 @@ async fn apply_metadata_update(
             }
             if let Some(first_user_message) = patch.first_user_message {
                 metadata.first_user_message = Some(first_user_message);
+            }
+            if let Some(side_conversation) = patch.side_conversation {
+                metadata.side_parent_thread_id = Some(side_conversation.parent_thread_id);
+                metadata.side_parent_turn_id = side_conversation.parent_turn_id;
             }
             if let Some(git_info) = patch.git_info {
                 let existing_git_info = git_info_from_parts(
@@ -383,9 +391,10 @@ fn has_observed_metadata_facts(patch: &ThreadMetadataPatch) -> bool {
         || patch.cwd.is_some()
         || patch.cli_version.is_some()
         || patch.approval_mode.is_some()
-        || patch.permission_profile.is_some()
-        || patch.token_usage.is_some()
-        || patch.first_user_message.is_some()
+    || patch.permission_profile.is_some()
+    || patch.token_usage.is_some()
+    || patch.first_user_message.is_some()
+    || patch.side_conversation.is_some()
 }
 
 fn enum_to_string<T: serde::Serialize>(value: &T) -> String {
@@ -606,6 +615,7 @@ fn rollout_path_is_archived(store: &LocalThreadStore, path: &Path) -> bool {
 #[cfg(test)]
 mod tests {
     use codex_protocol::models::PermissionProfile;
+    use codex_protocol::protocol::SideConversationMeta;
     use pretty_assertions::assert_eq;
     use serde_json::Value;
     use serde_json::json;
@@ -1470,6 +1480,7 @@ mod tests {
                 cwd_filters: Some(vec![workspace]),
                 archived: false,
                 search_term: None,
+                side_parent_thread_id: None,
                 use_state_db_only: true,
             })
             .await
@@ -1544,6 +1555,58 @@ mod tests {
                 .archived_at
                 .is_some()
         );
+    }
+
+    #[tokio::test]
+    async fn update_thread_metadata_lists_side_conversation_from_state_db() {
+        let home = TempDir::new().expect("temp dir");
+        let config = test_config(home.path());
+        let runtime = codex_state::StateRuntime::init(
+            config.sqlite_home.clone(),
+            config.default_model_provider_id.clone(),
+        )
+        .await
+        .expect("state db should initialize");
+        let store = LocalThreadStore::new(config, Some(runtime));
+        let uuid = Uuid::from_u128(321);
+        let thread_id = ThreadId::from_string(&uuid.to_string()).expect("valid thread id");
+        write_session_file(home.path(), "2025-01-03T21-00-00", uuid).expect("session file");
+        let side_conversation = SideConversationMeta {
+            parent_thread_id: ThreadId::new(),
+            parent_turn_id: Some("parent-turn-1".to_string()),
+        };
+
+        store
+            .update_thread_metadata(UpdateThreadMetadataParams {
+                thread_id,
+                patch: ThreadMetadataPatch {
+                    side_conversation: Some(side_conversation.clone()),
+                    ..Default::default()
+                },
+                include_archived: false,
+            })
+            .await
+            .expect("update side conversation metadata");
+
+        let page = store
+            .list_threads(ListThreadsParams {
+                page_size: 10,
+                cursor: None,
+                sort_key: ThreadSortKey::UpdatedAt,
+                sort_direction: SortDirection::Desc,
+                allowed_sources: Vec::new(),
+                model_providers: Some(Vec::new()),
+                cwd_filters: None,
+                archived: false,
+                search_term: None,
+                side_parent_thread_id: None,
+                use_state_db_only: true,
+            })
+            .await
+            .expect("list threads from state db");
+
+        assert_eq!(page.items.len(), 1);
+        assert_eq!(page.items[0].side_conversation, Some(side_conversation));
     }
 
     #[tokio::test]

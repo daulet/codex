@@ -13349,6 +13349,18 @@
           "description": "Session id shared by threads that belong to the same session tree.",
           "type": "string"
         },
+        "sideConversation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadSideConversation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Parent metadata when this thread was created as a persisted side conversation."
+        },
         "source": {
           "allOf": [
             {
@@ -13578,6 +13590,17 @@
             "null"
           ]
         },
+        "sideConversation": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ThreadForkSideConversationParams"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Marks this fork as a persisted side conversation attached to the source thread. When `parentTurnId` is omitted, the server attaches the side thread to the source thread's current tree leaf."
+        },
         "threadId": {
           "type": "string"
         },
@@ -13668,6 +13691,17 @@
         "thread"
       ],
       "title": "ThreadForkResponse",
+      "type": "object"
+    },
+    "ThreadForkSideConversationParams": {
+      "properties": {
+        "parentTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
       "type": "object"
     },
     "ThreadGoal": {
@@ -14634,6 +14668,13 @@
             "null"
           ]
         },
+        "sideParentThreadId": {
+          "description": "Optional side-conversation parent thread filter. When set, only side conversations forked directly from this thread are returned.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "sortDirection": {
           "anyOf": [
             {
@@ -15548,6 +15589,23 @@
     "ThreadShellCommandResponse": {
       "$schema": "http://json-schema.org/draft-07/schema#",
       "title": "ThreadShellCommandResponse",
+      "type": "object"
+    },
+    "ThreadSideConversation": {
+      "properties": {
+        "parentThreadId": {
+          "type": "string"
+        },
+        "parentTurnId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "parentThreadId"
+      ],
       "type": "object"
     },
     "ThreadSortKey": {

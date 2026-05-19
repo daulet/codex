@@ -48,6 +48,10 @@ pub struct ThreadItem {
     pub path: PathBuf,
     /// Thread ID from session metadata.
     pub thread_id: Option<ThreadId>,
+    /// Source thread id when this thread was forked.
+    pub forked_from_id: Option<ThreadId>,
+    /// Parent metadata when this thread is a persisted side conversation.
+    pub side_conversation: Option<codex_protocol::protocol::SideConversationMeta>,
     /// First user message captured for this thread, if any.
     pub first_user_message: Option<String>,
     /// Best available user-facing preview for discovery and list display.
@@ -88,6 +92,8 @@ pub type ConversationsPage = ThreadsPage;
 struct HeadTailSummary {
     saw_session_meta: bool,
     thread_id: Option<ThreadId>,
+    forked_from_id: Option<ThreadId>,
+    side_conversation: Option<codex_protocol::protocol::SideConversationMeta>,
     first_user_message: Option<String>,
     preview: Option<String>,
     cwd: Option<PathBuf>,
@@ -771,6 +777,8 @@ async fn build_thread_item(
     if summary.saw_session_meta && summary.preview.is_some() {
         let HeadTailSummary {
             thread_id,
+            forked_from_id,
+            side_conversation,
             first_user_message,
             preview,
             cwd,
@@ -792,6 +800,8 @@ async fn build_thread_item(
         return Some(ThreadItem {
             path,
             thread_id,
+            forked_from_id,
+            side_conversation,
             first_user_message,
             preview,
             cwd,
@@ -1105,6 +1115,8 @@ async fn read_head_summary(path: &Path, head_limit: usize) -> io::Result<HeadTai
                     summary.agent_role = session_meta_line.meta.agent_role.clone();
                     summary.model_provider = session_meta_line.meta.model_provider.clone();
                     summary.thread_id = Some(session_meta_line.meta.id);
+                    summary.forked_from_id = session_meta_line.meta.forked_from_id;
+                    summary.side_conversation = session_meta_line.meta.side_conversation.clone();
                     summary.cwd = Some(session_meta_line.meta.cwd.clone());
                     summary.git_branch = session_meta_line
                         .git

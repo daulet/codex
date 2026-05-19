@@ -88,6 +88,7 @@ pub(crate) async fn run_codex_thread_interactive(
         session_source: SessionSource::SubAgent(subagent_source.clone()),
         forked_from_thread_id: Some(parent_session.conversation_id),
         thread_source: Some(ThreadSource::Subagent),
+        side_conversation: None,
         agent_control: parent_session.services.agent_control.clone(),
         dynamic_tools: Vec::new(),
         persist_extended_history: false,

@@ -71,6 +71,7 @@ pub use session_index::find_thread_names_by_ids;
 pub use state_db::StateDbHandle;
 pub use state_db::sqlite_telemetry_recorder;
 pub use thread_tree::ThreadTree;
+pub use thread_tree::ThreadTreeSideBranch;
 pub use thread_tree::ThreadTreeTurn;
 pub use thread_tree::active_branch_items;
 pub use thread_tree::build_thread_tree;

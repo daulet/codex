@@ -359,6 +359,7 @@ pub async fn list_threads_db(
     allowed_sources: &[SessionSource],
     model_providers: Option<&[String]>,
     cwd_filters: Option<&[PathBuf]>,
+    side_parent_thread_id: Option<&str>,
     archived: bool,
     search_term: Option<&str>,
 ) -> Option<codex_state::ThreadsPage> {
@@ -395,6 +396,7 @@ pub async fn list_threads_db(
                 allowed_sources: allowed_sources.as_slice(),
                 model_providers: model_providers.as_deref(),
                 cwd_filters: normalized_cwd_filters.as_deref(),
+                side_parent_thread_id,
                 anchor: anchor.as_ref(),
                 sort_key: match sort_key {
                     ThreadSortKey::CreatedAt => codex_state::SortKey::CreatedAt,

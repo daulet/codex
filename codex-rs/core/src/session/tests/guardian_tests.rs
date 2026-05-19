@@ -694,6 +694,7 @@ async fn guardian_subagent_does_not_inherit_parent_exec_policy_rules() {
         )),
         forked_from_thread_id: None,
         thread_source: None,
+        side_conversation: None,
         agent_control: AgentControl::default(),
         dynamic_tools: Vec::new(),
         persist_extended_history: false,

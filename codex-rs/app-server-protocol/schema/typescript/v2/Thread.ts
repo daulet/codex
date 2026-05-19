@@ -4,6 +4,7 @@
 import type { AbsolutePathBuf } from "../AbsolutePathBuf";
 import type { GitInfo } from "./GitInfo";
 import type { SessionSource } from "./SessionSource";
+import type { ThreadSideConversation } from "./ThreadSideConversation";
 import type { ThreadSource } from "./ThreadSource";
 import type { ThreadStatus } from "./ThreadStatus";
 import type { Turn } from "./Turn";
@@ -17,6 +18,10 @@ sessionId: string,
  * Source thread id when this thread was created by forking another thread.
  */
 forkedFromId: string | null,
+/**
+ * Parent metadata when this thread was created as a persisted side conversation.
+ */
+sideConversation: ThreadSideConversation | null,
 /**
  * Usually the first user message in the thread, if available.
  */
