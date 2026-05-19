@@ -564,6 +564,11 @@ client_request_definitions! {
         serialization: thread_id(params.thread_id),
         response: v2::ThreadRollbackResponse,
     },
+    ThreadNavigate => "thread/navigate" {
+        params: v2::ThreadNavigateParams,
+        serialization: thread_id(params.thread_id),
+        response: v2::ThreadNavigateResponse,
+    },
     ThreadList => "thread/list" {
         params: v2::ThreadListParams,
         serialization: None,

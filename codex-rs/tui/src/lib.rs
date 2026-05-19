@@ -189,6 +189,7 @@ mod terminal_probe;
 mod terminal_title;
 mod text_formatting;
 mod theme_picker;
+mod thread_tree_view;
 mod token_usage;
 mod tooltips;
 mod transcript_reflow;
