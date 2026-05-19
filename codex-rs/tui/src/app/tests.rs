@@ -2851,6 +2851,7 @@ async fn inactive_thread_started_notification_initializes_replay_session() -> Re
                 id: agent_thread_id.to_string(),
                 session_id: agent_thread_id.to_string(),
                 forked_from_id: None,
+                side_conversation: None,
                 preview: "agent thread".to_string(),
                 ephemeral: false,
                 model_provider: "agent-provider".to_string(),
@@ -2940,6 +2941,7 @@ async fn inactive_thread_started_notification_preserves_primary_model_when_path_
                 id: agent_thread_id.to_string(),
                 session_id: agent_thread_id.to_string(),
                 forked_from_id: None,
+                side_conversation: None,
                 preview: "agent thread".to_string(),
                 ephemeral: false,
                 model_provider: "agent-provider".to_string(),
@@ -2998,6 +3000,7 @@ async fn thread_read_session_state_does_not_reuse_primary_permission_profile() {
         id: read_thread_id.to_string(),
         session_id: read_thread_id.to_string(),
         forked_from_id: None,
+        side_conversation: None,
         preview: "read thread".to_string(),
         ephemeral: false,
         model_provider: "read-provider".to_string(),
@@ -3093,14 +3096,15 @@ fn agent_picker_item_name_snapshot() {
 }
 
 #[tokio::test]
-async fn side_fork_config_is_ephemeral_and_appends_developer_guardrails() {
-    let app = make_test_app().await;
+async fn side_fork_config_is_persisted_and_appends_developer_guardrails() {
+    let mut app = make_test_app().await;
+    app.config.developer_instructions = Some("Existing developer policy.".to_string());
     let original_approval_policy = app.config.permissions.approval_policy.value();
     let original_sandbox_policy = app.config.legacy_sandbox_policy();
 
     let fork_config = app.side_fork_config();
 
-    assert!(fork_config.ephemeral);
+    assert!(!fork_config.ephemeral);
     assert_eq!(
         fork_config.permissions.approval_policy.value(),
         original_approval_policy
@@ -3493,13 +3497,12 @@ async fn side_discard_selection_keeps_current_side_thread() {
 #[tokio::test]
 async fn discard_side_thread_removes_agent_navigation_entry() -> Result<()> {
     Box::pin(async {
-        let mut app = make_test_app().await;
-        let mut app_server =
-            crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref()).await?;
-        let mut side_config = app.chat_widget.config_ref().clone();
-        side_config.ephemeral = true;
-        let started = app_server.start_thread(&side_config).await?;
-        let side_thread_id = started.session.thread_id;
+        let mut app = Box::pin(make_test_app()).await;
+        let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(
+            app.chat_widget.config_ref(),
+        ))
+        .await?;
+        let side_thread_id = ThreadId::new();
         app.side_threads
             .insert(side_thread_id, SideThreadState::new(ThreadId::new()));
         app.agent_navigation.upsert(
@@ -3509,10 +3512,7 @@ async fn discard_side_thread_removes_agent_navigation_entry() -> Result<()> {
             /*is_closed*/ false,
         );
 
-        assert!(
-            app.discard_side_thread(&mut app_server, side_thread_id)
-                .await
-        );
+        assert!(Box::pin(app.discard_side_thread(&mut app_server, side_thread_id)).await);
 
         assert_eq!(app.agent_navigation.get(&side_thread_id), None);
         assert!(!app.side_threads.contains_key(&side_thread_id));
@@ -3522,11 +3522,93 @@ async fn discard_side_thread_removes_agent_navigation_entry() -> Result<()> {
 }
 
 #[tokio::test]
-async fn discard_side_thread_keeps_local_state_when_server_close_fails() -> Result<()> {
+async fn discard_side_thread_surfaces_resume_hint_after_local_detach() -> Result<()> {
     Box::pin(async {
-        let mut app = make_test_app().await;
-        let mut app_server =
-            crate::start_embedded_app_server_for_picker(app.chat_widget.config_ref()).await?;
+        let (mut app, mut app_event_rx, _op_rx) = Box::pin(make_test_app_with_channels()).await;
+        while app_event_rx.try_recv().is_ok() {}
+
+        let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(
+            app.chat_widget.config_ref(),
+        ))
+        .await?;
+        let side_thread_id = ThreadId::new();
+        app.side_threads
+            .insert(side_thread_id, SideThreadState::new(ThreadId::new()));
+
+        assert!(Box::pin(app.discard_side_thread(&mut app_server, side_thread_id)).await);
+
+        let mut rendered_cells = Vec::new();
+        while let Ok(event) = app_event_rx.try_recv() {
+            if let AppEvent::InsertHistoryCell(cell) = event {
+                rendered_cells.push(lines_to_single_string(&cell.display_lines(/*width*/ 120)));
+            }
+        }
+        assert!(rendered_cells.iter().any(|rendered| {
+            rendered
+                .contains("Side conversation view closed. Resume it from /tree to continue later.")
+        }));
+        Ok(())
+    })
+    .await
+}
+
+#[tokio::test]
+async fn discard_side_thread_keeps_local_state_when_unsubscribe_fails() {
+    let (mut app, mut app_event_rx, _op_rx) = make_test_app_with_channels().await;
+    while app_event_rx.try_recv().is_ok() {}
+
+    let parent_thread_id = ThreadId::new();
+    let side_thread_id = ThreadId::new();
+    app.active_thread_id = Some(side_thread_id);
+    app.side_threads
+        .insert(side_thread_id, SideThreadState::new(parent_thread_id));
+    app.agent_navigation.upsert(
+        side_thread_id,
+        Some("Side".to_string()),
+        Some("side".to_string()),
+        /*is_closed*/ false,
+    );
+
+    assert!(
+        !app.finish_discard_side_thread(
+            side_thread_id,
+            Err(color_eyre::eyre::eyre!("unsubscribe failed")),
+        )
+        .await
+    );
+
+    assert_eq!(app.active_thread_id, Some(side_thread_id));
+    assert_eq!(
+        app.side_threads
+            .get(&side_thread_id)
+            .map(|state| state.parent_thread_id),
+        Some(parent_thread_id)
+    );
+    assert!(app.agent_navigation.get(&side_thread_id).is_some());
+
+    let mut rendered_cells = Vec::new();
+    while let Ok(event) = app_event_rx.try_recv() {
+        if let AppEvent::InsertHistoryCell(cell) = event {
+            rendered_cells.push(lines_to_single_string(&cell.display_lines(/*width*/ 120)));
+        }
+    }
+    assert!(rendered_cells.iter().any(|rendered| {
+        rendered.contains("Failed to close side conversation")
+            && rendered.contains("unsubscribe failed")
+    }));
+    assert!(rendered_cells.iter().all(|rendered| {
+        !rendered.contains("Side conversation view closed. Resume it from /tree to continue later.")
+    }));
+}
+
+#[tokio::test]
+async fn discard_side_thread_removes_local_state_when_server_thread_is_not_loaded() -> Result<()> {
+    Box::pin(async {
+        let mut app = Box::pin(make_test_app()).await;
+        let mut app_server = Box::pin(crate::start_embedded_app_server_for_picker(
+            app.chat_widget.config_ref(),
+        ))
+        .await?;
         let parent_thread_id = ThreadId::new();
         let side_thread_id = ThreadId::new();
         app.active_thread_id = Some(side_thread_id);
@@ -3539,19 +3621,11 @@ async fn discard_side_thread_keeps_local_state_when_server_close_fails() -> Resu
             /*is_closed*/ false,
         );
 
-        assert!(
-            !app.discard_side_thread(&mut app_server, side_thread_id)
-                .await
-        );
+        assert!(Box::pin(app.discard_side_thread(&mut app_server, side_thread_id)).await);
 
-        assert_eq!(app.active_thread_id, Some(side_thread_id));
-        assert_eq!(
-            app.side_threads
-                .get(&side_thread_id)
-                .map(|state| state.parent_thread_id),
-            Some(parent_thread_id)
-        );
-        assert!(app.agent_navigation.get(&side_thread_id).is_some());
+        assert_eq!(app.active_thread_id, None);
+        assert!(!app.side_threads.contains_key(&side_thread_id));
+        assert_eq!(app.agent_navigation.get(&side_thread_id), None);
         Ok(())
     })
     .await
@@ -5055,6 +5129,7 @@ async fn thread_rollback_response_discards_queued_active_thread_events() {
                 id: thread_id.to_string(),
                 session_id: thread_id.to_string(),
                 forked_from_id: None,
+                side_conversation: None,
                 preview: String::new(),
                 ephemeral: false,
                 model_provider: "openai".to_string(),

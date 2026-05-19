@@ -280,6 +280,7 @@ pub(crate) fn summary_to_thread(
         id: thread_id.clone(),
         session_id: thread_id,
         forked_from_id: None,
+        side_conversation: None,
         preview,
         ephemeral: false,
         model_provider,

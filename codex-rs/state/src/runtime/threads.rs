@@ -28,6 +28,8 @@ SELECT
     threads.approval_mode,
     threads.tokens_used,
     threads.first_user_message,
+    threads.side_parent_thread_id,
+    threads.side_parent_turn_id,
     threads.archived_at,
     threads.git_sha,
     threads.git_branch,
@@ -371,6 +373,7 @@ ON CONFLICT(child_thread_id) DO NOTHING
                 allowed_sources,
                 model_providers,
                 cwd_filters: None,
+                side_parent_thread_id: None,
                 anchor: None,
                 sort_key: crate::SortKey::UpdatedAt,
                 sort_direction: SortDirection::Desc,
@@ -450,6 +453,7 @@ ON CONFLICT(child_thread_id) DO NOTHING
                 allowed_sources,
                 model_providers,
                 cwd_filters: None,
+                side_parent_thread_id: None,
                 anchor,
                 sort_key,
                 sort_direction: SortDirection::Desc,
@@ -504,13 +508,15 @@ INSERT INTO threads (
     approval_mode,
     tokens_used,
     first_user_message,
+    side_parent_thread_id,
+    side_parent_turn_id,
     archived,
     archived_at,
     git_sha,
     git_branch,
     git_origin_url,
     memory_mode
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO NOTHING
             "#,
         )
@@ -545,6 +551,8 @@ ON CONFLICT(id) DO NOTHING
         .bind(metadata.approval_mode.as_str())
         .bind(metadata.tokens_used)
         .bind(metadata.first_user_message.as_deref().unwrap_or_default())
+        .bind(metadata.side_parent_thread_id.map(|id| id.to_string()))
+        .bind(metadata.side_parent_turn_id.as_deref())
         .bind(metadata.archived_at.is_some())
         .bind(metadata.archived_at.map(datetime_to_epoch_seconds))
         .bind(metadata.git_sha.as_deref())
@@ -710,13 +718,15 @@ INSERT INTO threads (
     approval_mode,
     tokens_used,
     first_user_message,
+    side_parent_thread_id,
+    side_parent_turn_id,
     archived,
     archived_at,
     git_sha,
     git_branch,
     git_origin_url,
     memory_mode
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(id) DO UPDATE SET
     rollout_path = excluded.rollout_path,
     created_at = excluded.created_at,
@@ -739,6 +749,8 @@ ON CONFLICT(id) DO UPDATE SET
     approval_mode = excluded.approval_mode,
     tokens_used = excluded.tokens_used,
     first_user_message = excluded.first_user_message,
+    side_parent_thread_id = COALESCE(threads.side_parent_thread_id, excluded.side_parent_thread_id),
+    side_parent_turn_id = COALESCE(threads.side_parent_turn_id, excluded.side_parent_turn_id),
     archived = excluded.archived,
     archived_at = excluded.archived_at,
     git_sha = COALESCE(threads.git_sha, excluded.git_sha),
@@ -777,6 +789,8 @@ ON CONFLICT(id) DO UPDATE SET
         .bind(metadata.approval_mode.as_str())
         .bind(metadata.tokens_used)
         .bind(metadata.first_user_message.as_deref().unwrap_or_default())
+        .bind(metadata.side_parent_thread_id.map(|id| id.to_string()))
+        .bind(metadata.side_parent_turn_id.as_deref())
         .bind(metadata.archived_at.is_some())
         .bind(metadata.archived_at.map(datetime_to_epoch_seconds))
         .bind(metadata.git_sha.as_deref())
@@ -999,6 +1013,8 @@ SELECT
     threads.approval_mode,
     threads.tokens_used,
     threads.first_user_message,
+    threads.side_parent_thread_id,
+    threads.side_parent_turn_id,
     threads.archived_at,
     threads.git_sha,
     threads.git_branch,
@@ -1045,6 +1061,7 @@ pub struct ThreadFilterOptions<'a> {
     pub allowed_sources: &'a [String],
     pub model_providers: Option<&'a [String]>,
     pub cwd_filters: Option<&'a [PathBuf]>,
+    pub side_parent_thread_id: Option<&'a str>,
     pub anchor: Option<&'a crate::Anchor>,
     pub sort_key: SortKey,
     pub sort_direction: SortDirection,
@@ -1060,6 +1077,7 @@ pub(super) fn push_thread_filters<'a>(
         allowed_sources,
         model_providers,
         cwd_filters,
+        side_parent_thread_id,
         anchor,
         sort_key,
         sort_direction,
@@ -1103,6 +1121,10 @@ pub(super) fn push_thread_filters<'a>(
             separated.push_unseparated(")");
         }
         None => {}
+    }
+    if let Some(side_parent_thread_id) = side_parent_thread_id {
+        builder.push(" AND threads.side_parent_thread_id = ");
+        builder.push_bind(side_parent_thread_id);
     }
     if let Some(search_term) = search_term {
         builder.push(" AND (instr(threads.title, ");
@@ -1173,6 +1195,7 @@ mod tests {
     use codex_protocol::protocol::SessionMeta;
     use codex_protocol::protocol::SessionMetaLine;
     use codex_protocol::protocol::SessionSource;
+    use codex_protocol::protocol::SideConversationMeta;
     use pretty_assertions::assert_eq;
     use std::path::PathBuf;
 
@@ -1257,6 +1280,7 @@ mod tests {
                     allowed_sources: &[],
                     model_providers: Some(&model_providers),
                     cwd_filters: None,
+                    side_parent_thread_id: None,
                     anchor: Some(&anchor),
                     sort_key: SortKey::UpdatedAt,
                     sort_direction: SortDirection::Asc,
@@ -1284,6 +1308,7 @@ mod tests {
                     allowed_sources: &[],
                     model_providers: Some(&model_providers),
                     cwd_filters: None,
+                    side_parent_thread_id: None,
                     anchor: page.next_anchor.as_ref(),
                     sort_key: SortKey::UpdatedAt,
                     sort_direction: SortDirection::Asc,
@@ -1337,6 +1362,7 @@ mod tests {
                     allowed_sources: &[],
                     model_providers: None,
                     cwd_filters: Some(cwd_filters.as_slice()),
+                    side_parent_thread_id: None,
                     anchor: None,
                     sort_key: SortKey::UpdatedAt,
                     sort_direction: SortDirection::Desc,
@@ -1357,6 +1383,7 @@ mod tests {
                     allowed_sources: &[],
                     model_providers: None,
                     cwd_filters: Some(&[]),
+                    side_parent_thread_id: None,
                     anchor: None,
                     sort_key: SortKey::UpdatedAt,
                     sort_direction: SortDirection::Desc,
@@ -1394,6 +1421,7 @@ mod tests {
             meta: SessionMeta {
                 id: thread_id,
                 forked_from_id: None,
+                side_conversation: None,
                 timestamp: metadata.created_at.to_rfc3339(),
                 cwd: PathBuf::new(),
                 originator: String::new(),
@@ -1453,6 +1481,7 @@ mod tests {
             meta: SessionMeta {
                 id: thread_id,
                 forked_from_id: None,
+                side_conversation: None,
                 timestamp: created_at,
                 cwd: PathBuf::new(),
                 originator: String::new(),
@@ -1493,6 +1522,133 @@ mod tests {
             persisted.git_origin_url.as_deref(),
             Some("git@example.com:openai/codex.git")
         );
+    }
+
+    #[tokio::test]
+    async fn apply_rollout_items_persists_side_parent_fields_and_later_upserts_preserve_them() {
+        let codex_home = unique_temp_dir();
+        let runtime = StateRuntime::init(codex_home.clone(), "test-provider".to_string())
+            .await
+            .expect("state db should initialize");
+        let thread_id =
+            ThreadId::from_string("00000000-0000-0000-0000-000000000460").expect("valid thread id");
+        let parent_thread_id =
+            ThreadId::from_string("00000000-0000-0000-0000-000000000461").expect("valid thread id");
+        let metadata = test_thread_metadata(&codex_home, thread_id, codex_home.clone());
+
+        runtime
+            .upsert_thread(&metadata)
+            .await
+            .expect("initial upsert should succeed");
+
+        let builder = ThreadMetadataBuilder::new(
+            thread_id,
+            metadata.rollout_path.clone(),
+            metadata.created_at,
+            SessionSource::Cli,
+        );
+        let items = vec![RolloutItem::SessionMeta(SessionMetaLine {
+            meta: SessionMeta {
+                id: thread_id,
+                forked_from_id: None,
+                side_conversation: Some(SideConversationMeta {
+                    parent_thread_id,
+                    parent_turn_id: Some("turn-parent".to_string()),
+                }),
+                timestamp: metadata.created_at.to_rfc3339(),
+                cwd: PathBuf::new(),
+                originator: String::new(),
+                cli_version: String::new(),
+                source: SessionSource::Cli,
+                thread_source: None,
+                agent_path: None,
+                agent_nickname: None,
+                agent_role: None,
+                model_provider: None,
+                base_instructions: None,
+                dynamic_tools: None,
+                memory_mode: None,
+            },
+            git: None,
+        })];
+
+        runtime
+            .apply_rollout_items(
+                &builder, &items, /*new_thread_memory_mode*/ None,
+                /*updated_at_override*/ None,
+            )
+            .await
+            .expect("apply_rollout_items should succeed");
+
+        let persisted = runtime
+            .get_thread(thread_id)
+            .await
+            .expect("thread should load")
+            .expect("thread should exist");
+        assert_eq!(persisted.side_parent_thread_id, Some(parent_thread_id));
+        assert_eq!(
+            persisted.side_parent_turn_id.as_deref(),
+            Some("turn-parent")
+        );
+
+        runtime
+            .upsert_thread(&metadata)
+            .await
+            .expect("metadata refresh should succeed");
+
+        let refreshed = runtime
+            .get_thread(thread_id)
+            .await
+            .expect("thread should load")
+            .expect("thread should exist");
+        assert_eq!(refreshed.side_parent_thread_id, Some(parent_thread_id));
+        assert_eq!(
+            refreshed.side_parent_turn_id.as_deref(),
+            Some("turn-parent")
+        );
+
+        let parent_filter = parent_thread_id.to_string();
+        let page = runtime
+            .list_threads(
+                /*page_size*/ 10,
+                ThreadFilterOptions {
+                    archived_only: false,
+                    allowed_sources: &[],
+                    model_providers: None,
+                    cwd_filters: None,
+                    side_parent_thread_id: Some(parent_filter.as_str()),
+                    anchor: None,
+                    sort_key: SortKey::UpdatedAt,
+                    sort_direction: SortDirection::Desc,
+                    search_term: None,
+                },
+            )
+            .await
+            .expect("side-parent-filtered list should succeed");
+        assert_eq!(
+            page.items.iter().map(|item| item.id).collect::<Vec<_>>(),
+            vec![thread_id]
+        );
+
+        let other_parent_filter = ThreadId::new().to_string();
+        let page = runtime
+            .list_threads(
+                /*page_size*/ 10,
+                ThreadFilterOptions {
+                    archived_only: false,
+                    allowed_sources: &[],
+                    model_providers: None,
+                    cwd_filters: None,
+                    side_parent_thread_id: Some(other_parent_filter.as_str()),
+                    anchor: None,
+                    sort_key: SortKey::UpdatedAt,
+                    sort_direction: SortDirection::Desc,
+                    search_term: None,
+                },
+            )
+            .await
+            .expect("mismatched side-parent-filtered list should succeed");
+        assert_eq!(page.items, Vec::new());
     }
 
     #[tokio::test]

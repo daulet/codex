@@ -11,6 +11,7 @@ use codex_protocol::protocol::GitInfo;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::SandboxPolicy;
 use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SideConversationMeta;
 use codex_protocol::protocol::ThreadMemoryMode as MemoryMode;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TokenUsage;
@@ -72,6 +73,8 @@ pub struct CreateThreadParams {
     pub thread_id: ThreadId,
     /// Source thread id when this thread is created as a fork.
     pub forked_from_id: Option<ThreadId>,
+    /// Side-conversation parent metadata when this thread was created by `/side`.
+    pub side_conversation: Option<SideConversationMeta>,
     /// Runtime source for the thread.
     pub source: SessionSource,
     /// Optional analytics source classification for this thread.
@@ -195,6 +198,9 @@ pub struct ListThreadsParams {
     pub archived: bool,
     /// Optional substring/full-text search term for thread title/preview.
     pub search_term: Option<String>,
+    /// Optional side-conversation parent thread filter. When set, only
+    /// matching side conversations are returned.
+    pub side_parent_thread_id: Option<String>,
     /// Return directly from the state DB without scanning JSONL rollouts to repair metadata.
     pub use_state_db_only: bool,
 }
@@ -328,6 +334,8 @@ pub struct StoredThread {
     pub rollout_path: Option<PathBuf>,
     /// Source thread id when this thread was forked from another thread.
     pub forked_from_id: Option<ThreadId>,
+    /// Side-conversation parent metadata when this thread was created by `/side`.
+    pub side_conversation: Option<SideConversationMeta>,
     /// Best available user-facing preview, usually the first user message.
     pub preview: String,
     /// Optional user-facing thread name/title.
@@ -491,6 +499,8 @@ pub struct ThreadMetadataPatch {
     pub token_usage: Option<TokenUsage>,
     /// First user message observed for this thread.
     pub first_user_message: Option<String>,
+    /// Side-conversation parent metadata observed for this thread.
+    pub side_conversation: Option<SideConversationMeta>,
     /// Git metadata patch.
     pub git_info: Option<GitInfoPatch>,
     /// Thread memory behavior.
@@ -566,6 +576,9 @@ impl ThreadMetadataPatch {
         if next.first_user_message.is_some() {
             self.first_user_message = next.first_user_message;
         }
+        if next.side_conversation.is_some() {
+            self.side_conversation = next.side_conversation;
+        }
         if let Some(git_info) = next.git_info {
             self.git_info
                 .get_or_insert_with(GitInfoPatch::default)
@@ -600,6 +613,7 @@ impl ThreadMetadataPatch {
             && self.sandbox_policy.is_none()
             && self.token_usage.is_none()
             && self.first_user_message.is_none()
+            && self.side_conversation.is_none()
             && self.git_info.is_none()
             && self.memory_mode.is_none()
             && self.dynamic_tools.is_none()

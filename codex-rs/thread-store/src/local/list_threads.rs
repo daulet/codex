@@ -127,6 +127,7 @@ async fn list_rollout_threads(
             params.allowed_sources.as_slice(),
             params.model_providers.as_deref(),
             params.cwd_filters.as_deref(),
+            params.side_parent_thread_id.as_deref(),
             default_model_provider_id,
             params.search_term.as_deref(),
         )
@@ -142,6 +143,7 @@ async fn list_rollout_threads(
             params.allowed_sources.as_slice(),
             params.model_providers.as_deref(),
             params.cwd_filters.as_deref(),
+            params.side_parent_thread_id.as_deref(),
             default_model_provider_id,
             params.search_term.as_deref(),
         )
@@ -157,6 +159,7 @@ async fn list_rollout_threads(
             params.allowed_sources.as_slice(),
             params.model_providers.as_deref(),
             params.cwd_filters.as_deref(),
+            params.side_parent_thread_id.as_deref(),
             default_model_provider_id,
             params.search_term.as_deref(),
         )
@@ -172,6 +175,7 @@ async fn list_rollout_threads(
             params.allowed_sources.as_slice(),
             params.model_providers.as_deref(),
             params.cwd_filters.as_deref(),
+            params.side_parent_thread_id.as_deref(),
             default_model_provider_id,
             params.search_term.as_deref(),
         )
@@ -225,6 +229,7 @@ mod tests {
                 cwd_filters: None,
                 archived: false,
                 search_term: None,
+                side_parent_thread_id: None,
                 use_state_db_only: false,
             })
             .await
@@ -284,6 +289,7 @@ mod tests {
                 cwd_filters: None,
                 archived: false,
                 search_term: Some("needle".to_string()),
+                side_parent_thread_id: None,
                 use_state_db_only: true,
             })
             .await
@@ -323,6 +329,7 @@ mod tests {
                 cwd_filters: None,
                 archived: false,
                 search_term: None,
+                side_parent_thread_id: None,
                 use_state_db_only: false,
             })
             .await
@@ -338,6 +345,7 @@ mod tests {
                 cwd_filters: None,
                 archived: true,
                 search_term: None,
+                side_parent_thread_id: None,
                 use_state_db_only: false,
             })
             .await
@@ -389,6 +397,7 @@ mod tests {
                 cwd_filters: None,
                 archived: false,
                 search_term: None,
+                side_parent_thread_id: None,
                 use_state_db_only: false,
             })
             .await
@@ -425,6 +434,7 @@ mod tests {
                 cwd_filters: None,
                 archived: false,
                 search_term: None,
+                side_parent_thread_id: None,
                 use_state_db_only: false,
             })
             .await

@@ -44,6 +44,7 @@ use codex_protocol::protocol::ResumedHistory;
 use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::SessionConfiguredEvent;
 use codex_protocol::protocol::SessionSource;
+use codex_protocol::protocol::SideConversationMeta;
 use codex_protocol::protocol::SubAgentSource;
 use codex_protocol::protocol::ThreadSource;
 use codex_protocol::protocol::TurnAbortReason;
@@ -597,6 +598,7 @@ impl ThreadManager {
             thread_source,
             options.dynamic_tools,
             options.persist_extended_history,
+            /*side_conversation*/ None,
             options.metrics_service_name,
             /*inherited_shell_snapshot*/ None,
             /*inherited_exec_policy*/ None,
@@ -676,6 +678,7 @@ impl ThreadManager {
             thread_source,
             Vec::new(),
             persist_extended_history,
+            /*side_conversation*/ None,
             /*metrics_service_name*/ None,
             parent_trace,
             environments,
@@ -701,6 +704,7 @@ impl ThreadManager {
             /*thread_source*/ None,
             Vec::new(),
             /*persist_extended_history*/ false,
+            /*side_conversation*/ None,
             /*metrics_service_name*/ None,
             /*parent_trace*/ None,
             environments,
@@ -730,6 +734,7 @@ impl ThreadManager {
             thread_source,
             Vec::new(),
             /*persist_extended_history*/ false,
+            /*side_conversation*/ None,
             /*metrics_service_name*/ None,
             /*parent_trace*/ None,
             environments,
@@ -825,6 +830,37 @@ impl ThreadManager {
         .await
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "keeps the side-conversation fork entry point parallel to the existing fork constructors"
+    )]
+    pub async fn fork_thread_with_side_conversation<S>(
+        &self,
+        snapshot: S,
+        config: Config,
+        path: PathBuf,
+        thread_source: Option<ThreadSource>,
+        persist_extended_history: bool,
+        side_conversation: Option<SideConversationMeta>,
+        parent_trace: Option<W3cTraceContext>,
+    ) -> CodexResult<NewThread>
+    where
+        S: Into<ForkSnapshot>,
+    {
+        let snapshot = snapshot.into();
+        let history = self.initial_history_from_rollout_path(path).await?;
+        self.fork_thread_from_history_with_side_conversation(
+            snapshot,
+            config,
+            history,
+            thread_source,
+            persist_extended_history,
+            side_conversation,
+            parent_trace,
+        )
+        .await
+    }
+
     async fn initial_history_from_rollout_path(
         &self,
         rollout_path: PathBuf,
@@ -856,17 +892,51 @@ impl ThreadManager {
     where
         S: Into<ForkSnapshot>,
     {
+        self.fork_thread_from_history_with_side_conversation(
+            snapshot,
+            config,
+            history,
+            thread_source,
+            persist_extended_history,
+            /*side_conversation*/ None,
+            parent_trace,
+        )
+        .await
+    }
+
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "side-conversation metadata is only needed by persisted side forks"
+    )]
+    pub async fn fork_thread_from_history_with_side_conversation<S>(
+        &self,
+        snapshot: S,
+        config: Config,
+        history: InitialHistory,
+        thread_source: Option<ThreadSource>,
+        persist_extended_history: bool,
+        side_conversation: Option<SideConversationMeta>,
+        parent_trace: Option<W3cTraceContext>,
+    ) -> CodexResult<NewThread>
+    where
+        S: Into<ForkSnapshot>,
+    {
         self.fork_thread_with_initial_history(
             snapshot.into(),
             config,
             history,
             thread_source,
             persist_extended_history,
+            side_conversation,
             parent_trace,
         )
         .await
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "internal fork constructor mirrors the public fork entry points"
+    )]
     async fn fork_thread_with_initial_history(
         &self,
         snapshot: ForkSnapshot,
@@ -874,6 +944,7 @@ impl ThreadManager {
         history: InitialHistory,
         thread_source: Option<ThreadSource>,
         persist_extended_history: bool,
+        side_conversation: Option<SideConversationMeta>,
         parent_trace: Option<W3cTraceContext>,
     ) -> CodexResult<NewThread> {
         let interrupted_marker = InterruptedTurnHistoryMarker::from_config(&config);
@@ -890,6 +961,7 @@ impl ThreadManager {
             thread_source,
             Vec::new(),
             persist_extended_history,
+            side_conversation,
             /*metrics_service_name*/ None,
             parent_trace,
             environments,
@@ -1034,6 +1106,7 @@ impl ThreadManagerState {
             thread_source,
             Vec::new(),
             persist_extended_history,
+            /*side_conversation*/ None,
             metrics_service_name,
             inherited_shell_snapshot,
             inherited_exec_policy,
@@ -1068,6 +1141,7 @@ impl ThreadManagerState {
             thread_source,
             Vec::new(),
             /*persist_extended_history*/ false,
+            /*side_conversation*/ None,
             /*metrics_service_name*/ None,
             inherited_shell_snapshot,
             inherited_exec_policy,
@@ -1103,6 +1177,7 @@ impl ThreadManagerState {
             thread_source,
             Vec::new(),
             persist_extended_history,
+            /*side_conversation*/ None,
             /*metrics_service_name*/ None,
             inherited_shell_snapshot,
             inherited_exec_policy,
@@ -1124,6 +1199,7 @@ impl ThreadManagerState {
         thread_source: Option<ThreadSource>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
+        side_conversation: Option<SideConversationMeta>,
         metrics_service_name: Option<String>,
         parent_trace: Option<W3cTraceContext>,
         environments: Vec<TurnEnvironmentSelection>,
@@ -1138,6 +1214,7 @@ impl ThreadManagerState {
             thread_source,
             dynamic_tools,
             persist_extended_history,
+            side_conversation,
             metrics_service_name,
             /*inherited_shell_snapshot*/ None,
             /*inherited_exec_policy*/ None,
@@ -1159,6 +1236,7 @@ impl ThreadManagerState {
         thread_source: Option<ThreadSource>,
         dynamic_tools: Vec<codex_protocol::dynamic_tools::DynamicToolSpec>,
         persist_extended_history: bool,
+        side_conversation: Option<SideConversationMeta>,
         metrics_service_name: Option<String>,
         inherited_shell_snapshot: Option<Arc<ShellSnapshot>>,
         inherited_exec_policy: Option<Arc<crate::exec_policy::ExecPolicyManager>>,
@@ -1209,6 +1287,7 @@ impl ThreadManagerState {
             conversation_history: initial_history,
             session_source,
             thread_source,
+            side_conversation,
             agent_control,
             dynamic_tools,
             persist_extended_history,
