@@ -117,6 +117,7 @@ use codex_protocol::protocol::RolloutItem;
 use codex_protocol::protocol::SkillScope;
 use codex_protocol::protocol::Submission;
 use codex_protocol::protocol::ThreadGoalStatus;
+use codex_protocol::protocol::ThreadNavigatedEvent;
 use codex_protocol::protocol::ThreadRolledBackEvent;
 use codex_protocol::protocol::TokenCountEvent;
 use codex_protocol::protocol::TokenUsage;
@@ -2877,6 +2878,181 @@ async fn thread_rollback_fails_when_turn_in_progress() {
 }
 
 #[tokio::test]
+async fn thread_navigate_selects_existing_branch_from_rollout_tree() {
+    let (mut sess, _tc, rx) = make_session_and_context_with_rx().await;
+    let rollout_path = attach_thread_persistence(
+        Arc::get_mut(&mut sess).expect("session should not have additional references"),
+    )
+    .await;
+
+    sess.persist_rollout_items(&[
+        RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+            turn_id: "turn-1".to_string(),
+            started_at: None,
+            model_context_window: Some(128_000),
+            collaboration_mode_kind: ModeKind::Default,
+        })),
+        RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            message: "turn 1 user".to_string(),
+            images: None,
+            image_details: Vec::new(),
+            local_images: Vec::new(),
+            local_image_details: Vec::new(),
+            text_elements: Vec::new(),
+        })),
+        RolloutItem::ResponseItem(user_message("turn 1 user")),
+        RolloutItem::ResponseItem(assistant_message("turn 1 assistant")),
+        RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+            turn_id: "turn-1".to_string(),
+            last_agent_message: None,
+            completed_at: None,
+            duration_ms: None,
+            time_to_first_token_ms: None,
+        })),
+        RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+            turn_id: "turn-2a".to_string(),
+            started_at: None,
+            model_context_window: Some(128_000),
+            collaboration_mode_kind: ModeKind::Default,
+        })),
+        RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            message: "turn 2a user".to_string(),
+            images: None,
+            image_details: Vec::new(),
+            local_images: Vec::new(),
+            local_image_details: Vec::new(),
+            text_elements: Vec::new(),
+        })),
+        RolloutItem::ResponseItem(user_message("turn 2a user")),
+        RolloutItem::ResponseItem(assistant_message("turn 2a assistant")),
+        RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+            turn_id: "turn-2a".to_string(),
+            last_agent_message: None,
+            completed_at: None,
+            duration_ms: None,
+            time_to_first_token_ms: None,
+        })),
+        RolloutItem::EventMsg(EventMsg::ThreadRolledBack(ThreadRolledBackEvent {
+            num_turns: 1,
+        })),
+        RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+            turn_id: "turn-2b".to_string(),
+            started_at: None,
+            model_context_window: Some(128_000),
+            collaboration_mode_kind: ModeKind::Default,
+        })),
+        RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            message: "turn 2b user".to_string(),
+            images: None,
+            image_details: Vec::new(),
+            local_images: Vec::new(),
+            local_image_details: Vec::new(),
+            text_elements: Vec::new(),
+        })),
+        RolloutItem::ResponseItem(user_message("turn 2b user")),
+        RolloutItem::ResponseItem(assistant_message("turn 2b assistant")),
+        RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+            turn_id: "turn-2b".to_string(),
+            last_agent_message: None,
+            completed_at: None,
+            duration_ms: None,
+            time_to_first_token_ms: None,
+        })),
+    ])
+    .await;
+
+    handlers::thread_navigate(&sess, "sub-1".to_string(), Some("turn-2a".to_string())).await;
+
+    let navigated_event = wait_for_thread_navigated(&rx).await;
+    assert_eq!(
+        navigated_event.previous_leaf_turn_id.as_deref(),
+        Some("turn-2b")
+    );
+    assert_eq!(navigated_event.target_turn_id.as_deref(), Some("turn-2a"));
+    assert_eq!(
+        sess.clone_history().await.raw_items(),
+        vec![
+            user_message("turn 1 user"),
+            assistant_message("turn 1 assistant"),
+            user_message("turn 2a user"),
+            assistant_message("turn 2a assistant"),
+        ]
+    );
+
+    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
+        .await
+        .expect("read rollout history")
+    else {
+        panic!("expected resumed rollout history");
+    };
+    assert!(resumed.history.iter().any(|item| {
+        matches!(
+            item,
+            RolloutItem::EventMsg(EventMsg::ThreadNavigated(event))
+            if event.target_turn_id.as_deref() == Some("turn-2a")
+        )
+    }));
+}
+
+#[tokio::test]
+async fn thread_navigate_to_current_leaf_does_not_persist_marker() {
+    let (mut sess, _tc, rx) = make_session_and_context_with_rx().await;
+    let rollout_path = attach_thread_persistence(
+        Arc::get_mut(&mut sess).expect("session should not have additional references"),
+    )
+    .await;
+
+    sess.persist_rollout_items(&[
+        RolloutItem::EventMsg(EventMsg::TurnStarted(TurnStartedEvent {
+            turn_id: "turn-1".to_string(),
+            started_at: None,
+            model_context_window: Some(128_000),
+            collaboration_mode_kind: ModeKind::Default,
+        })),
+        RolloutItem::EventMsg(EventMsg::UserMessage(UserMessageEvent {
+            message: "turn 1 user".to_string(),
+            images: None,
+            image_details: Vec::new(),
+            local_images: Vec::new(),
+            local_image_details: Vec::new(),
+            text_elements: Vec::new(),
+        })),
+        RolloutItem::ResponseItem(user_message("turn 1 user")),
+        RolloutItem::ResponseItem(assistant_message("turn 1 assistant")),
+        RolloutItem::EventMsg(EventMsg::TurnComplete(TurnCompleteEvent {
+            turn_id: "turn-1".to_string(),
+            last_agent_message: None,
+            completed_at: None,
+            duration_ms: None,
+            time_to_first_token_ms: None,
+        })),
+    ])
+    .await;
+
+    handlers::thread_navigate(&sess, "sub-1".to_string(), Some("turn-1".to_string())).await;
+
+    let navigated_event = wait_for_thread_navigated(&rx).await;
+    assert_eq!(
+        navigated_event.previous_leaf_turn_id.as_deref(),
+        Some("turn-1")
+    );
+    assert_eq!(navigated_event.target_turn_id.as_deref(), Some("turn-1"));
+
+    let InitialHistory::Resumed(resumed) = RolloutRecorder::get_rollout_history(&rollout_path)
+        .await
+        .expect("read rollout history")
+    else {
+        panic!("expected resumed rollout history");
+    };
+    assert!(
+        !resumed
+            .history
+            .iter()
+            .any(|item| matches!(item, RolloutItem::EventMsg(EventMsg::ThreadNavigated(_))))
+    );
+}
+
+#[tokio::test]
 async fn thread_rollback_fails_when_num_turns_is_zero() {
     let (sess, tc, rx) = make_session_and_context_with_rx().await;
 
@@ -3261,6 +3437,22 @@ async fn wait_for_thread_rolled_back(rx: &async_channel::Receiver<Event>) -> Thr
             .expect("event");
         match evt.msg {
             EventMsg::ThreadRolledBack(payload) => return payload,
+            _ => continue,
+        }
+    }
+}
+
+async fn wait_for_thread_navigated(rx: &async_channel::Receiver<Event>) -> ThreadNavigatedEvent {
+    let deadline = StdDuration::from_secs(2);
+    let start = std::time::Instant::now();
+    loop {
+        let remaining = deadline.saturating_sub(start.elapsed());
+        let evt = tokio::time::timeout(remaining, rx.recv())
+            .await
+            .expect("timeout waiting for event")
+            .expect("event");
+        match evt.msg {
+            EventMsg::ThreadNavigated(payload) => return payload,
             _ => continue,
         }
     }

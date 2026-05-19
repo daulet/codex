@@ -580,6 +580,16 @@ impl ThreadRequestProcessor {
             .map(|()| None)
     }
 
+    pub(crate) async fn thread_navigate(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: ThreadNavigateParams,
+    ) -> Result<Option<ClientResponsePayload>, JSONRPCErrorError> {
+        self.thread_navigate_inner(request_id, params)
+            .await
+            .map(|()| None)
+    }
+
     pub(crate) async fn thread_list(
         &self,
         params: ThreadListParams,
@@ -1668,7 +1678,9 @@ impl ThreadRequestProcessor {
         let rollback_already_in_progress = {
             let thread_state = self.thread_state_manager.thread_state(thread_id).await;
             let mut thread_state = thread_state.lock().await;
-            if thread_state.pending_rollbacks.is_some() {
+            if thread_state.pending_rollbacks.is_some()
+                || thread_state.pending_thread_navigation.is_some()
+            {
                 true
             } else {
                 thread_state.pending_rollbacks = Some(request.clone());
@@ -1677,7 +1689,7 @@ impl ThreadRequestProcessor {
         };
         if rollback_already_in_progress {
             return Err(invalid_request(
-                "rollback already in progress for this thread",
+                "history navigation already in progress for this thread",
             ));
         }
 
@@ -1695,6 +1707,55 @@ impl ThreadRequestProcessor {
             thread_state.lock().await.pending_rollbacks = None;
 
             return Err(internal_error(format!("failed to start rollback: {err}")));
+        }
+        Ok(())
+    }
+
+    async fn thread_navigate_inner(
+        &self,
+        request_id: &ConnectionRequestId,
+        params: ThreadNavigateParams,
+    ) -> Result<(), JSONRPCErrorError> {
+        let ThreadNavigateParams {
+            thread_id,
+            target_turn_id,
+        } = params;
+
+        let (thread_id, thread) = self.load_thread(&thread_id).await?;
+        let request = request_id.clone();
+
+        let navigation_already_in_progress = {
+            let thread_state = self.thread_state_manager.thread_state(thread_id).await;
+            let mut thread_state = thread_state.lock().await;
+            if thread_state.pending_rollbacks.is_some()
+                || thread_state.pending_thread_navigation.is_some()
+            {
+                true
+            } else {
+                thread_state.pending_thread_navigation = Some(request.clone());
+                false
+            }
+        };
+        if navigation_already_in_progress {
+            return Err(invalid_request(
+                "history navigation already in progress for this thread",
+            ));
+        }
+
+        if let Err(err) = self
+            .submit_core_op(
+                request_id,
+                thread.as_ref(),
+                Op::ThreadNavigate { target_turn_id },
+            )
+            .await
+        {
+            let thread_state = self.thread_state_manager.thread_state(thread_id).await;
+            thread_state.lock().await.pending_thread_navigation = None;
+
+            return Err(internal_error(format!(
+                "failed to start tree navigation: {err}"
+            )));
         }
         Ok(())
     }
@@ -2011,7 +2072,8 @@ impl ThreadRequestProcessor {
                 let (mut thread, history) =
                     thread_from_stored_thread(stored_thread, fallback_provider, &self.config.cwd);
                 if include_turns && let Some(history) = history {
-                    thread.turns = build_api_turns_from_rollout_items(&history.items);
+                    let active_branch_items = codex_rollout::active_branch_items(&history.items);
+                    thread.turns = build_api_turns_from_rollout_items(&active_branch_items);
                 }
                 Ok(Some(thread))
             }
@@ -2077,7 +2139,8 @@ impl ThreadRequestProcessor {
                 .load_history(/*include_archived*/ true)
                 .await
                 .map_err(|err| thread_read_history_load_error(thread_id, err))?;
-            thread.turns = build_api_turns_from_rollout_items(&history.items);
+            let active_branch_items = codex_rollout::active_branch_items(&history.items);
+            thread.turns = build_api_turns_from_rollout_items(&active_branch_items);
         }
 
         Ok(())
@@ -3543,7 +3606,8 @@ fn reconstruct_thread_turns_for_turns_list(
         || active_turn
             .as_ref()
             .is_some_and(|turn| matches!(turn.status, TurnStatus::InProgress));
-    let mut turns = build_api_turns_from_rollout_items(items);
+    let active_branch_items = codex_rollout::active_branch_items(items);
+    let mut turns = build_api_turns_from_rollout_items(&active_branch_items);
     normalize_thread_turns_status(&mut turns, loaded_status, has_live_in_progress_turn);
     if let Some(active_turn) = active_turn {
         merge_turn_history_with_active_turn(&mut turns, active_turn);

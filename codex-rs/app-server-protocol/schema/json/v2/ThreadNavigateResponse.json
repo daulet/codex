@@ -2049,12 +2049,17 @@
   },
   "properties": {
     "thread": {
-      "$ref": "#/definitions/Thread"
+      "allOf": [
+        {
+          "$ref": "#/definitions/Thread"
+        }
+      ],
+      "description": "The updated thread after navigation, with `turns` populated.\n\nThe ThreadItems stored in each Turn are lossy since we explicitly do not persist all agent interactions, such as command executions. This is the same behavior as `thread/resume`."
     }
   },
   "required": [
     "thread"
   ],
-  "title": "ThreadStartedNotification",
+  "title": "ThreadNavigateResponse",
   "type": "object"
 }

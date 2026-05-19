@@ -206,6 +206,14 @@ pub(crate) enum AppEvent {
     /// Fork the current session into a new thread.
     ForkCurrentSession,
 
+    /// Open the current session's persisted branch tree.
+    OpenThreadTree,
+
+    /// Navigate the current session to a persisted branch tree leaf.
+    NavigateThreadTree {
+        target_turn_id: Option<String>,
+    },
+
     /// Request to exit the application.
     ///
     /// Use `ShutdownFirst` for user-initiated quits so core cleanup runs and the

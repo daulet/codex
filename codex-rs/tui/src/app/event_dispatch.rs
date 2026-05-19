@@ -190,6 +190,101 @@ impl App {
             AppEvent::BeginThreadSwitchHistoryReplayBuffer => {
                 self.begin_thread_switch_history_replay_buffer();
             }
+            AppEvent::OpenThreadTree => {
+                let Some(rollout_path) = self.chat_widget.rollout_path() else {
+                    self.chat_widget.add_error_message(
+                        "A persisted thread is required before /tree can show branches."
+                            .to_string(),
+                    );
+                    return Ok(AppRunControl::Continue);
+                };
+
+                match codex_rollout::RolloutRecorder::load_rollout_items(rollout_path.as_path())
+                    .await
+                {
+                    Ok((rollout_items, _thread_id, _parse_errors)) => {
+                        let tree = codex_rollout::build_thread_tree(&rollout_items);
+                        if tree.turns.is_empty() {
+                            self.chat_widget.add_info_message(
+                                "No completed turns are available yet.".to_string(),
+                                /*hint*/ None,
+                            );
+                        } else {
+                            self.chat_widget.show_selection_view(
+                                crate::thread_tree_view::build_thread_tree_params(tree),
+                            );
+                        }
+                    }
+                    Err(err) => {
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to load conversation tree from {}: {err}",
+                            rollout_path.display()
+                        ));
+                    }
+                }
+
+                tui.frame_requester().schedule_frame();
+            }
+            AppEvent::NavigateThreadTree { target_turn_id } => {
+                let Some(thread_id) = self.chat_widget.thread_id() else {
+                    self.chat_widget.add_error_message(
+                        "A loaded thread is required before /tree can switch branches.".to_string(),
+                    );
+                    return Ok(AppRunControl::Continue);
+                };
+
+                match app_server.thread_navigate(thread_id, target_turn_id).await {
+                    Ok(response) => {
+                        let turns = response.thread.turns.clone();
+                        let session = self
+                            .session_state_for_thread_read(thread_id, &response.thread)
+                            .await;
+                        let init = self.chatwidget_init_for_forked_or_resumed_thread(
+                            tui,
+                            self.config.clone(),
+                            /*initial_user_message*/ None,
+                        );
+                        self.replace_chat_widget(ChatWidget::new_with_app_event(init));
+                        self.reset_for_thread_switch(tui)?;
+                        self.enqueue_primary_thread_session(session, turns).await?;
+                        if let Some(channel) = self.thread_event_channels.get(&thread_id) {
+                            let mut store = channel.store.lock().await;
+                            store.buffer.clear();
+                            store.pending_interactive_replay = Default::default();
+                            store.input_state = None;
+                        }
+                        if self.active_thread_id == Some(thread_id)
+                            && let Some(mut rx) = self.active_thread_rx.take()
+                        {
+                            let mut disconnected = false;
+                            loop {
+                                match rx.try_recv() {
+                                    Ok(_) => {}
+                                    Err(TryRecvError::Empty) => break,
+                                    Err(TryRecvError::Disconnected) => {
+                                        disconnected = true;
+                                        break;
+                                    }
+                                }
+                            }
+
+                            if !disconnected {
+                                self.active_thread_rx = Some(rx);
+                            } else {
+                                self.clear_active_thread().await;
+                            }
+                        }
+                        self.backfill_loaded_subagent_threads(app_server).await;
+                    }
+                    Err(err) => {
+                        self.chat_widget.add_error_message(format!(
+                            "Failed to switch conversation branch: {err}"
+                        ));
+                    }
+                }
+
+                tui.frame_requester().schedule_frame();
+            }
             AppEvent::InsertHistoryCell(cell) => {
                 let cell: Arc<dyn HistoryCell> = cell.into();
                 if let Some(Overlay::Transcript(t)) = &mut self.overlay {

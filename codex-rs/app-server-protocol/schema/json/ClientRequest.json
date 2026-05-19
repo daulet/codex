@@ -3336,6 +3336,24 @@
       ],
       "type": "object"
     },
+    "ThreadNavigateParams": {
+      "properties": {
+        "targetTurnId": {
+          "description": "Existing turn id to make active. Omit or pass null to navigate to the root.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "threadId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "threadId"
+      ],
+      "type": "object"
+    },
     "ThreadReadParams": {
       "properties": {
         "includeTurns": {
@@ -4429,6 +4447,30 @@
         "params"
       ],
       "title": "Thread/rollbackRequest",
+      "type": "object"
+    },
+    {
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/RequestId"
+        },
+        "method": {
+          "enum": [
+            "thread/navigate"
+          ],
+          "title": "Thread/navigateRequestMethod",
+          "type": "string"
+        },
+        "params": {
+          "$ref": "#/definitions/ThreadNavigateParams"
+        }
+      },
+      "required": [
+        "id",
+        "method",
+        "params"
+      ],
+      "title": "Thread/navigateRequest",
       "type": "object"
     },
     {

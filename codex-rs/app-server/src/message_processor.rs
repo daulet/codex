@@ -1056,6 +1056,11 @@ impl MessageProcessor {
                     .thread_rollback(&request_id, params)
                     .await
             }
+            ClientRequest::ThreadNavigate { params, .. } => {
+                self.thread_processor
+                    .thread_navigate(&request_id, params)
+                    .await
+            }
             ClientRequest::ThreadList { params, .. } => {
                 self.thread_processor.thread_list(params).await
             }
