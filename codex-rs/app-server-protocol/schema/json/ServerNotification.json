@@ -566,6 +566,7 @@
             "unauthorized",
             "badRequest",
             "threadRollbackFailed",
+            "threadNavigationFailed",
             "sandboxError",
             "other"
           ],

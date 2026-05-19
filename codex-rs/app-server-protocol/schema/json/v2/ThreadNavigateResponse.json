@@ -5,87 +5,8 @@
       "description": "A path that is guaranteed to be absolute and normalized (though it is not guaranteed to be canonicalized or exist on the filesystem).\n\nIMPORTANT: When deserializing an `AbsolutePathBuf`, a base path must be set using [AbsolutePathBufGuard::new]. If no base path is set, the deserialization will fail unless the path being deserialized is already absolute.",
       "type": "string"
     },
-    "ActivePermissionProfile": {
-      "properties": {
-        "extends": {
-          "default": null,
-          "description": "Parent profile identifier from the selected permissions profile's `extends` setting, when present.",
-          "type": [
-            "string",
-            "null"
-          ]
-        },
-        "id": {
-          "description": "Identifier from `default_permissions` or the implicit built-in default, such as `:workspace` or a user-defined `[permissions.<id>]` profile.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "id"
-      ],
-      "type": "object"
-    },
     "AgentPath": {
       "type": "string"
-    },
-    "ApprovalsReviewer": {
-      "description": "Configures who approval requests are routed to for review. Examples include sandbox escapes, blocked network access, MCP approval prompts, and ARC escalations. Defaults to `user`. `auto_review` uses a carefully prompted subagent to gather relevant context and apply a risk-based decision framework before approving or denying the request. The legacy value `guardian_subagent` is accepted for compatibility.",
-      "enum": [
-        "user",
-        "auto_review",
-        "guardian_subagent"
-      ],
-      "type": "string"
-    },
-    "AskForApproval": {
-      "oneOf": [
-        {
-          "enum": [
-            "untrusted",
-            "on-failure",
-            "on-request",
-            "never"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "granular": {
-              "properties": {
-                "mcp_elicitations": {
-                  "type": "boolean"
-                },
-                "request_permissions": {
-                  "default": false,
-                  "type": "boolean"
-                },
-                "rules": {
-                  "type": "boolean"
-                },
-                "sandbox_approval": {
-                  "type": "boolean"
-                },
-                "skill_approval": {
-                  "default": false,
-                  "type": "boolean"
-                }
-              },
-              "required": [
-                "mcp_elicitations",
-                "rules",
-                "sandbox_approval"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "granular"
-          ],
-          "title": "GranularAskForApproval",
-          "type": "object"
-        }
-      ]
     },
     "ByteRange": {
       "properties": {
@@ -635,13 +556,6 @@
         }
       ]
     },
-    "NetworkAccess": {
-      "enum": [
-        "restricted",
-        "enabled"
-      ],
-      "type": "string"
-    },
     "NonSteerableTurnKind": {
       "enum": [
         "review",
@@ -727,105 +641,6 @@
         "xhigh"
       ],
       "type": "string"
-    },
-    "SandboxPolicy": {
-      "oneOf": [
-        {
-          "properties": {
-            "type": {
-              "enum": [
-                "dangerFullAccess"
-              ],
-              "title": "DangerFullAccessSandboxPolicyType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "DangerFullAccessSandboxPolicy",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "networkAccess": {
-              "default": false,
-              "type": "boolean"
-            },
-            "type": {
-              "enum": [
-                "readOnly"
-              ],
-              "title": "ReadOnlySandboxPolicyType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "ReadOnlySandboxPolicy",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "networkAccess": {
-              "allOf": [
-                {
-                  "$ref": "#/definitions/NetworkAccess"
-                }
-              ],
-              "default": "restricted"
-            },
-            "type": {
-              "enum": [
-                "externalSandbox"
-              ],
-              "title": "ExternalSandboxSandboxPolicyType",
-              "type": "string"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "ExternalSandboxSandboxPolicy",
-          "type": "object"
-        },
-        {
-          "properties": {
-            "excludeSlashTmp": {
-              "default": false,
-              "type": "boolean"
-            },
-            "excludeTmpdirEnvVar": {
-              "default": false,
-              "type": "boolean"
-            },
-            "networkAccess": {
-              "default": false,
-              "type": "boolean"
-            },
-            "type": {
-              "enum": [
-                "workspaceWrite"
-              ],
-              "title": "WorkspaceWriteSandboxPolicyType",
-              "type": "string"
-            },
-            "writableRoots": {
-              "default": [],
-              "items": {
-                "$ref": "#/definitions/AbsolutePathBuf"
-              },
-              "type": "array"
-            }
-          },
-          "required": [
-            "type"
-          ],
-          "title": "WorkspaceWriteSandboxPolicy",
-          "type": "object"
-        }
-      ]
     },
     "SessionSource": {
       "oneOf": [
@@ -2239,71 +2054,18 @@
     }
   },
   "properties": {
-    "approvalPolicy": {
-      "$ref": "#/definitions/AskForApproval"
-    },
-    "approvalsReviewer": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/ApprovalsReviewer"
-        }
-      ],
-      "description": "Reviewer currently used for approval requests on this thread."
-    },
-    "cwd": {
-      "$ref": "#/definitions/AbsolutePathBuf"
-    },
-    "instructionSources": {
-      "default": [],
-      "description": "Instruction source files currently loaded for this thread.",
-      "items": {
-        "$ref": "#/definitions/AbsolutePathBuf"
-      },
-      "type": "array"
-    },
-    "model": {
-      "type": "string"
-    },
-    "modelProvider": {
-      "type": "string"
-    },
-    "reasoningEffort": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/ReasoningEffort"
-        },
-        {
-          "type": "null"
-        }
-      ]
-    },
-    "sandbox": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/SandboxPolicy"
-        }
-      ],
-      "description": "Legacy sandbox policy retained for compatibility. Experimental clients should prefer `activePermissionProfile` for profile provenance."
-    },
-    "serviceTier": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "thread": {
-      "$ref": "#/definitions/Thread"
+      "allOf": [
+        {
+          "$ref": "#/definitions/Thread"
+        }
+      ],
+      "description": "The updated thread after navigation, with `turns` populated.\n\nThe ThreadItems stored in each Turn are lossy since we explicitly do not persist all agent interactions, such as command executions. This is the same behavior as `thread/resume`."
     }
   },
   "required": [
-    "approvalPolicy",
-    "approvalsReviewer",
-    "cwd",
-    "model",
-    "modelProvider",
-    "sandbox",
     "thread"
   ],
-  "title": "ThreadStartResponse",
+  "title": "ThreadNavigateResponse",
   "type": "object"
 }
