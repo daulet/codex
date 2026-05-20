@@ -3765,6 +3765,7 @@ dependencies = [
  "codex-app-server-protocol",
  "codex-code-mode",
  "codex-features",
+ "codex-otel",
  "codex-protocol",
  "codex-utils-absolute-path",
  "codex-utils-output-truncation",
