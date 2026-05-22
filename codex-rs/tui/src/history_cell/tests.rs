@@ -201,6 +201,17 @@ fn raw_lines_from_source_preserves_trailing_blank_but_not_trailing_newline() {
 }
 
 #[test]
+fn update_available_history_cell_uses_fork_release_links() {
+    let cell = UpdateAvailableHistoryCell::new("9.9.9".to_string(), /*update_action*/ None);
+    let rendered = render_lines(&cell.display_lines(/*width*/ 120)).join("\n");
+
+    insta::assert_snapshot!(
+        "update_available_history_cell_uses_fork_release_links",
+        rendered
+    );
+}
+
+#[test]
 fn source_backed_cells_render_raw_source_without_prefix_or_style() {
     let user = new_user_prompt(
         "hello\n\nworld\n".to_string(),
