@@ -391,10 +391,10 @@ fn has_observed_metadata_facts(patch: &ThreadMetadataPatch) -> bool {
         || patch.cwd.is_some()
         || patch.cli_version.is_some()
         || patch.approval_mode.is_some()
-    || patch.permission_profile.is_some()
-    || patch.token_usage.is_some()
-    || patch.first_user_message.is_some()
-    || patch.side_conversation.is_some()
+        || patch.permission_profile.is_some()
+        || patch.token_usage.is_some()
+        || patch.first_user_message.is_some()
+        || patch.side_conversation.is_some()
 }
 
 fn enum_to_string<T: serde::Serialize>(value: &T) -> String {

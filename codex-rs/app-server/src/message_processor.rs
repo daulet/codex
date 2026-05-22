@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::sync::atomic::AtomicBool;
@@ -856,21 +857,40 @@ impl MessageProcessor {
         Ok(())
     }
 
-    async fn handle_initialized_client_request(
+    fn handle_initialized_client_request(
         self: Arc<Self>,
         connection_request_id: ConnectionRequestId,
         codex_request: ClientRequest,
         request_context: RequestContext,
         app_server_client_name: Option<String>,
         client_version: Option<String>,
-    ) -> Result<(), JSONRPCErrorError> {
+    ) -> Pin<Box<dyn Future<Output = Result<(), JSONRPCErrorError>> + Send>> {
         let connection_id = connection_request_id.connection_id;
         let request_id = ConnectionRequestId {
             connection_id,
             request_id: codex_request.id().clone(),
         };
+        let response_request_id = request_id.clone();
+        let outgoing = Arc::clone(&self.outgoing);
 
-        let result: Result<Option<ClientResponsePayload>, JSONRPCErrorError> = match codex_request {
+        type InitializedRequestResult = Result<Option<ClientResponsePayload>, JSONRPCErrorError>;
+        type InitializedRequestFuture =
+            Pin<Box<dyn Future<Output = InitializedRequestResult> + Send>>;
+        // Keep each request arm as its own boxed future so this large dispatcher does not build
+        // one oversized async state machine on the runtime worker stack.
+        macro_rules! boxed_request_result_match {
+            ($request:expr, { $($pattern:pat => $body:expr $(,)?)* }) => {
+                match $request {
+                    $(
+                        $pattern => {
+                            let future: InitializedRequestFuture = Box::pin(async move { $body });
+                            future
+                        },
+                    )*
+                }
+            };
+        }
+        let result: InitializedRequestFuture = boxed_request_result_match!(codex_request, {
             ClientRequest::Initialize { .. } => {
                 panic!("Initialize should be handled before initialized request dispatch");
             }
@@ -1356,20 +1376,25 @@ impl MessageProcessor {
             ClientRequest::FeedbackUpload { params, .. } => {
                 self.feedback_processor.feedback_upload(params).await
             }
-        };
+        });
 
-        match result {
-            Ok(Some(response)) => {
-                self.outgoing
-                    .send_response_as(request_id.clone(), response)
-                    .await;
+        Box::pin(async move {
+            let result = result.await;
+            match result {
+                Ok(Some(response)) => {
+                    outgoing
+                        .send_response_as(response_request_id.clone(), response)
+                        .await;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    outgoing
+                        .send_error(response_request_id.clone(), error)
+                        .await;
+                }
             }
-            Ok(None) => {}
-            Err(error) => {
-                self.outgoing.send_error(request_id.clone(), error).await;
-            }
-        }
-        Ok(())
+            Ok(())
+        })
     }
 }
 

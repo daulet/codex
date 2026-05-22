@@ -350,7 +350,7 @@ impl HistoryCell for AgentMessageCell {
     }
 
     fn copy_text(&self) -> Option<String> {
-        lines_plain_text(&self.lines)
+        lines_plain_text(&visible_lines(self.lines.clone()))
     }
 }
 

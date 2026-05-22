@@ -205,7 +205,6 @@ pub(crate) trait HistoryCell: std::fmt::Debug + Send + Sync + Any {
         }
     }
 
-<<<<<<< HEAD
     fn display_hyperlink_lines_for_mode(
         &self,
         width: u16,
