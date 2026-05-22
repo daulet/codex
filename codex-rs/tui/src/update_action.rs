@@ -7,7 +7,6 @@ use codex_install_context::StandalonePlatform;
 
 const FORK_HOMEBREW_FORMULA: &str = "daulet/tap/codex";
 const FORK_RELEASE_NOTES_URL: &str = "https://github.com/daulet/codex/releases/latest";
-const UPSTREAM_RELEASE_NOTES_URL: &str = "https://github.com/openai/codex/releases/latest";
 
 /// Update action the CLI should perform after the TUI exits.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,11 +64,11 @@ impl UpdateAction {
 
     pub fn release_notes_url(self) -> &'static str {
         match self {
-            UpdateAction::BrewUpgrade => FORK_RELEASE_NOTES_URL,
             UpdateAction::NpmGlobalLatest
             | UpdateAction::BunGlobalLatest
+            | UpdateAction::BrewUpgrade
             | UpdateAction::StandaloneUnix
-            | UpdateAction::StandaloneWindows => UPSTREAM_RELEASE_NOTES_URL,
+            | UpdateAction::StandaloneWindows => FORK_RELEASE_NOTES_URL,
         }
     }
 }
@@ -175,5 +174,21 @@ mod tests {
             UpdateAction::BrewUpgrade.release_notes_url(),
             "https://github.com/daulet/codex/releases/latest"
         );
+    }
+
+    #[test]
+    fn every_update_action_uses_fork_release_notes() {
+        for update_action in [
+            UpdateAction::NpmGlobalLatest,
+            UpdateAction::BunGlobalLatest,
+            UpdateAction::BrewUpgrade,
+            UpdateAction::StandaloneUnix,
+            UpdateAction::StandaloneWindows,
+        ] {
+            assert_eq!(
+                update_action.release_notes_url(),
+                "https://github.com/daulet/codex/releases/latest"
+            );
+        }
     }
 }

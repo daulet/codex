@@ -1,10 +1,6 @@
 #![cfg(not(debug_assertions))]
 
 use crate::legacy_core::config::Config;
-use crate::npm_registry;
-use crate::npm_registry::NpmPackageInfo;
-use crate::update_action;
-use crate::update_action::UpdateAction;
 use crate::update_versions::extract_version_from_latest_tag;
 use crate::update_versions::is_newer;
 use crate::update_versions::is_source_build_version;
@@ -24,7 +20,6 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
         return None;
     }
 
-    let action = update_action::get_update_action();
     let version_file = version_filepath(config);
     let info = read_version_info(&version_file).ok();
 
@@ -36,7 +31,7 @@ pub fn get_upgrade_version(config: &Config) -> Option<String> {
         // isn’t blocked by a network call. The UI reads the previously cached
         // value (if any) for this run; the next run shows the banner if needed.
         tokio::spawn(async move {
-            check_for_update(&version_file, action)
+            check_for_update(&version_file)
                 .await
                 .inspect_err(|e| tracing::error!("Failed to update version: {e}"))
         });
@@ -62,7 +57,6 @@ struct VersionInfo {
 
 const VERSION_FILENAME: &str = "version.json";
 const FORK_LATEST_RELEASE_URL: &str = "https://api.github.com/repos/daulet/codex/releases/latest";
-const LATEST_RELEASE_URL: &str = "https://api.github.com/repos/openai/codex/releases/latest";
 
 #[derive(Deserialize, Debug, Clone)]
 struct ReleaseInfo {
@@ -78,27 +72,8 @@ fn read_version_info(version_file: &Path) -> anyhow::Result<VersionInfo> {
     Ok(serde_json::from_str(&contents)?)
 }
 
-async fn check_for_update(version_file: &Path, action: Option<UpdateAction>) -> anyhow::Result<()> {
-    let latest_version = match action {
-        Some(UpdateAction::BrewUpgrade) => {
-            fetch_latest_github_release_version(FORK_LATEST_RELEASE_URL).await?
-        }
-        Some(UpdateAction::NpmGlobalLatest) | Some(UpdateAction::BunGlobalLatest) => {
-            let latest_version = fetch_latest_github_release_version(LATEST_RELEASE_URL).await?;
-            let package_info = create_client()
-                .get(npm_registry::PACKAGE_URL)
-                .send()
-                .await?
-                .error_for_status()?
-                .json::<NpmPackageInfo>()
-                .await?;
-            npm_registry::ensure_version_ready(&package_info, &latest_version)?;
-            latest_version
-        }
-        Some(UpdateAction::StandaloneUnix) | Some(UpdateAction::StandaloneWindows) | None => {
-            fetch_latest_github_release_version(LATEST_RELEASE_URL).await?
-        }
-    };
+async fn check_for_update(version_file: &Path) -> anyhow::Result<()> {
+    let latest_version = fetch_latest_github_release_version(FORK_LATEST_RELEASE_URL).await?;
 
     // Preserve any previously dismissed version if present.
     let prev_info = read_version_info(version_file).ok();
