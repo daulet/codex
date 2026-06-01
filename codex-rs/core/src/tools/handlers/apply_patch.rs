@@ -417,10 +417,9 @@ impl ToolExecutor<ToolInvocation> for ApplyPatchHandler {
                             Some(&tracker),
                         );
                         let content = emitter.finish(event_ctx, out, delta.as_ref()).await?;
-                        Ok(boxed_tool_output(ApplyPatchToolOutput::from_text_with_usage(
-                            content,
-                            telemetry_usage,
-                        )))
+                        Ok(boxed_tool_output(
+                            ApplyPatchToolOutput::from_text_with_usage(content, telemetry_usage),
+                        ))
                     }
                 }
             }

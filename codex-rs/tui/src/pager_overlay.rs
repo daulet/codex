@@ -789,7 +789,8 @@ impl TranscriptOverlay {
         let cell = self.cells.get(idx)?;
         if cell.as_any().is::<UserHistoryCell>() {
             Some("user message")
-        } else if cell.as_any().is::<AgentMarkdownCell>() || cell.as_any().is::<AgentMessageCell>() {
+        } else if cell.as_any().is::<AgentMarkdownCell>() || cell.as_any().is::<AgentMessageCell>()
+        {
             Some("assistant message")
         } else {
             None
