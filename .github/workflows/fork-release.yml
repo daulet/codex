@@ -42,7 +42,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@a0b273b48ed29de4470960879e8381ff45632f26 # 1.93.0
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
 
       - id: metadata
         name: Resolve release metadata
@@ -196,7 +196,7 @@ jobs:
           sudo apt-get update -y
           sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends libubsan1
 
-      - uses: dtolnay/rust-toolchain@a0b273b48ed29de4470960879e8381ff45632f26 # 1.93.0
+      - uses: dtolnay/rust-toolchain@e081816240890017053eacbb1bdf337761dc5582 # 1.95.0
         with:
           targets: ${{ matrix.target }}
 
@@ -282,9 +282,8 @@ jobs:
             echo "CXXFLAGS=${cxxflags}"
           } >> "$GITHUB_ENV"
 
-      - name: Configure musl rusty_v8 artifact overrides
-        if: runner.os == 'Linux'
-        uses: ./.github/actions/setup-rusty-v8-musl
+      - name: Configure rusty_v8 artifact overrides
+        uses: ./.github/actions/setup-rusty-v8
         with:
           target: ${{ matrix.target }}
 
@@ -294,9 +293,10 @@ jobs:
           for attempt in 1 2 3; do
             if cargo build --locked --target "${{ matrix.target }}" --release --package codex-cli --bin codex; then
               exit 0
+            else
+              status=$?
             fi
 
-            status=$?
             if [[ "$attempt" == 3 ]]; then
               exit "$status"
             fi
